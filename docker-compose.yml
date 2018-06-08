@@ -1,0 +1,17 @@
+version: "3.3"
+
+services:
+  wallet:
+#    image: exccco/exchangecoin_wallet:latest
+    build: .
+    ports:
+     - "5111:9111"
+     - "5110:9110"
+    networks:
+      - stakepool
+    working_dir: /go/bin
+    command: exccwallet -u rpcuser -P rpcpass --noinitialload --grpclisten=0.0.0.0:9111 --rpclisten=0.0.0.0:9110 --walletpass=user --appdata=/.exccwallet/
+
+networks:
+  stakepool:
+    driver: bridge
