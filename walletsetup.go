@@ -67,7 +67,7 @@ func createWallet(ctx context.Context, cfg *config) error {
 	go func() {
 		reader := bufio.NewReader(os.Stdin)
 		privPass, pubPass, seed, imported, err = prompt.Setup(reader,
-			[]byte(wallet.InsecurePubPassphrase), []byte(cfg.WalletPass))
+			[]byte(wallet.InsecurePubPassphrase), []byte(cfg.WalletPass), cfg.Pass)
 		c <- struct{}{}
 	}()
 	select {
