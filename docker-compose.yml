@@ -2,8 +2,8 @@ version: "3.3"
 
 services:
   wallet:
-#    image: exccco/exchangecoin_wallet:latest
-    build: .
+    image: exccco/exchangecoin_wallet:latest
+#    build: .
     ports:
      - "5111:9111"
      - "5110:9110"
