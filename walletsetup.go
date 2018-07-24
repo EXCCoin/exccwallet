@@ -37,8 +37,8 @@ func networkDir(dataDir string, chainParams *chaincfg.Params) string {
 	// future.  This is done to future proof that change, and an upgrade
 	// plan to move the testnet data directory can be worked out later.
 	switch chainParams.Net {
-	case wire.TestNet2:
-		netname = "testnet2"
+	case wire.TestNet:
+		netname = "testnet"
 	}
 
 	return filepath.Join(dataDir, netname)

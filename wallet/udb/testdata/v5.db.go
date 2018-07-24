@@ -47,7 +47,7 @@ var (
 	addr     exccutil.Address
 )
 
-var chainParams = &chaincfg.TestNet2Params
+var chainParams = &chaincfg.TestNetParams
 
 var (
 	epoch     time.Time

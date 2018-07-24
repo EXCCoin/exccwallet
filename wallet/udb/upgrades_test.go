@@ -89,7 +89,7 @@ func TestUpgrades(t *testing.T) {
 }
 
 func verifyV2Upgrade(t *testing.T, db walletdb.DB) {
-	amgr, _, _, err := Open(db, &chaincfg.TestNet2Params, pubPass)
+	amgr, _, _, err := Open(db, &chaincfg.TestNetParams, pubPass)
 	if err != nil {
 		t.Fatalf("Open after Upgrade failed: %v", err)
 	}
@@ -158,7 +158,7 @@ func verifyV2Upgrade(t *testing.T, db walletdb.DB) {
 }
 
 func verifyV3Upgrade(t *testing.T, db walletdb.DB) {
-	_, _, smgr, err := Open(db, &chaincfg.TestNet2Params, pubPass)
+	_, _, smgr, err := Open(db, &chaincfg.TestNetParams, pubPass)
 	if err != nil {
 		t.Fatalf("Open after Upgrade failed: %v", err)
 	}
