@@ -54,7 +54,7 @@ func main() {
 }
 
 func setup() error {
-	var chainParams = &chaincfg.TestNet2Params
+	var chainParams = &chaincfg.TestNetParams
 	os.Remove(dbname)
 	db, err := walletdb.Create("bdb", dbname)
 	if err != nil {

@@ -26,10 +26,10 @@ var MainNetParams = Params{
 	GRPCServerPort:    "9111",
 }
 
-// TestNet2Params contains parameters specific running exccwallet and
-// exccd on the test network (version 2) (wire.TestNet2).
-var TestNet2Params = Params{
-	Params:            &chaincfg.TestNet2Params,
+// TestNetParams contains parameters specific running exccwallet and
+// exccd on the test network (version 2) (wire.TestNet).
+var TestNetParams = Params{
+	Params:            &chaincfg.TestNetParams,
 	JSONRPCClientPort: "19109",
 	JSONRPCServerPort: "19110",
 	GRPCServerPort:    "19111",

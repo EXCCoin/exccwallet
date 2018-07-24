@@ -30,7 +30,7 @@ var (
 	privPass = []byte("private")
 )
 
-var chainParams = &chaincfg.TestNet2Params
+var chainParams = &chaincfg.TestNetParams
 
 func main() {
 	err := setup()
