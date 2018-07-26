@@ -2,6 +2,7 @@ exccwallet
 =========
 
 [![Build Status](https://travis-ci.org/EXCCoin/exccwallet.png?branch=master)](https://travis-ci.org/EXCCoin/exccwallet)
+[![Build status](https://ci.appveyor.com/api/projects/status/rl4mu81dib1vss33?svg=true)](https://ci.appveyor.com/project/Excc/exccwallet)
 [![ISC License](http://img.shields.io/badge/license-ISC-blue.svg)](http://copyfree.org)
 [![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](http://godoc.org/github.com/EXCCoin/exccwallet)
 [![GoReportCard](https://goreportcard.com/badge/github.com/EXCCoin/exccwallet)](https://goreportcard.com/report/github.com/EXCCoin/exccwallet)
