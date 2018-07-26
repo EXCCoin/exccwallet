@@ -3026,7 +3026,7 @@ func (w *Wallet) SortedActivePaymentAddresses() ([]string, error) {
 		return nil, err
 	}
 
-	sort.Sort(sort.StringSlice(addrStrs))
+	sort.Strings(addrStrs)
 	return addrStrs, nil
 }
 
