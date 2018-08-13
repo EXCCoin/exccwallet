@@ -93,7 +93,7 @@ type handler struct {
 
 // jsonAuthFail sends a message back to the client if the http auth is rejected.
 func jsonAuthFail(w http.ResponseWriter) {
-	w.Header().Add("WWW-Authenticate", `Basic realm="btcwallet RPC"`)
+	w.Header().Add("WWW-Authenticate", `Basic realm="btcwallet RPC", realm="jsonrpc"`)
 	http.Error(w, "401 Unauthorized.", http.StatusUnauthorized)
 }
 
