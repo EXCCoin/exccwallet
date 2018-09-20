@@ -10,20 +10,35 @@ import (
 	"encoding/hex"
 	"strings"
 
+	"crypto/rand"
 	"fmt"
-	"github.com/EXCCoin/exccd/hdkeychain"
 	"github.com/EXCCoin/exccwallet/pgpwordlist"
 	"strconv"
 )
 
-// GenerateRandomSeed returns a new seed created from a cryptographically-secure
-// random source.  If the seed size is unacceptable,
-// hdkeychain.ErrInvalidSeedLen is returned.
-func GenerateRandomSeed(size uint) ([]byte, error) {
-	if size >= uint(^uint8(0)) {
-		return nil, hdkeychain.ErrInvalidSeedLen
+var (
+	MinEntBytes       = uint(16)
+	MaxEntBytes       = uint(32)
+	RecommendedEntLen = uint(32)
+	ErrInvalidEntLen  = fmt.Errorf("entropy length must be between %d and %d bits", MinEntBytes*8, MaxEntBytes*8)
+)
+
+// GenerateRandomEntropy returns a new seed created from a cryptographically-secure
+// random source. If the seed size is unacceptable,
+// ErrInvalidEntLen is returned.
+func GenerateRandomEntropy(size uint) ([]byte, error) {
+	// Per [BIP32], entropy must be in range [MinEntBytes, MaxEntBytes].
+	if size < MinEntBytes || size > MaxEntBytes {
+		return nil, ErrInvalidEntLen
 	}
-	return hdkeychain.GenerateSeed(uint8(size))
+
+	buf := make([]byte, size)
+	_, err := rand.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf, nil
 }
 
 // ------------------------------------------------------------------------
@@ -111,4 +126,10 @@ func DecodeUserInput(input, password string) ([]byte, error) {
 	}
 
 	return seed, nil
+}
+
+// DecodeMnemonicSlice decodes a seed in mnemonic word list
+// encoding back into its binary form.
+func DecodeMnemonicSlice(input []string, password string) ([]byte, error) {
+	return DecodeUserInput(strings.Join(input, " "), password)
 }
