@@ -3593,14 +3593,7 @@ func Create(db walletdb.DB, pubPass, privPass, seed []byte, params *chaincfg.Par
 	// we generate a random seed for the wallet with the recommended seed
 	// length.
 	if seed == nil {
-		hdSeed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
-		if err != nil {
-			return err
-		}
-		seed = hdSeed
-	}
-	if len(seed) < hdkeychain.MinSeedBytes || len(seed) > hdkeychain.MaxSeedBytes {
-		return hdkeychain.ErrInvalidSeedLen
+		return fmt.Errorf("seed is required argument")
 	}
 
 	return udb.Initialize(db, params, seed, pubPass, privPass)

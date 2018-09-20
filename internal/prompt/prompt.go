@@ -15,7 +15,6 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/EXCCoin/exccd/hdkeychain"
 	"github.com/EXCCoin/exccwallet/walletseed"
 	"golang.org/x/crypto/ssh/terminal"
 )
@@ -215,29 +214,38 @@ func PublicPass(reader *bufio.Reader, privPass []byte,
 // restored from a given seed or not.
 func Seed(reader *bufio.Reader) (seed []byte, imported bool, err error) {
 	// Ascertain the wallet generation seed.
-	useUserSeed, err := promptListBool(reader, "Do you have an "+
-		"existing wallet seed you want to use?", "no")
+	useUserSeed, err := promptListBool(
+		reader,
+		"Do you have an existing wallet seed you want to use?",
+		"no")
+
 	if err != nil {
 		return nil, false, err
 	}
+
 	if !useUserSeed {
-		seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
+		ent, err := walletseed.GenerateRandomEntropy(walletseed.RecommendedEntLen)
 		if err != nil {
 			return nil, false, err
 		}
 
-		seedStrSplit, err := walletseed.EncodeMnemonicSlice(seed)
+		mnemonicSlice, err := walletseed.EncodeMnemonicSlice(ent)
 		if err != nil {
 			return nil, false, err
 		}
 
 		fmt.Println("Your wallet generation seed is:")
-		for i := 0; i < len(seedStrSplit); i++ {
-			fmt.Printf("%v ", seedStrSplit[i])
+		for i := 0; i < len(mnemonicSlice); i++ {
+			fmt.Printf("%v ", mnemonicSlice[i])
 
 			if (i+1)%6 == 0 {
 				fmt.Printf("\n")
 			}
+		}
+
+		seed, err := walletseed.DecodeMnemonicSlice(mnemonicSlice, "")
+		if err != nil {
+			return nil, false, err
 		}
 
 		fmt.Printf("\n\nHex: %x\n", seed)

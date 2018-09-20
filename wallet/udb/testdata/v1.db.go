@@ -51,7 +51,7 @@ func setup() error {
 		return err
 	}
 	defer db.Close()
-	seed, err := walletseed.GenerateRandomSeed(hdkeychain.RecommendedSeedLen)
+	seed, err := walletseed.GenerateRandomEntropy(walletseed.RecommendedEntLen)
 	if err != nil {
 		return err
 	}

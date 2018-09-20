@@ -16,7 +16,6 @@ import (
 	"strings"
 
 	"github.com/EXCCoin/exccd/chaincfg"
-	"github.com/EXCCoin/exccd/hdkeychain"
 	"github.com/EXCCoin/exccd/wire"
 	"github.com/EXCCoin/exccwallet/internal/prompt"
 	"github.com/EXCCoin/exccwallet/loader"
@@ -98,22 +97,22 @@ func createSimulationWallet(cfg *config) error {
 	// Public passphrase is the default.
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
-	// Generate a random seed.
-	seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
+	// Generate a random ent.
+	ent, err := walletseed.GenerateRandomEntropy(walletseed.RecommendedEntLen)
 	if err != nil {
 		return err
 	}
 
 	netDir := networkDir(cfg.AppDataDir.Value, activeNet.Params)
 
-	// Write the seed to disk, so that we can restore it later
+	// Write the ent to disk, so that we can restore it later
 	// if need be, for testing purposes.
-	seedStr, err := walletseed.EncodeMnemonic(seed)
+	mnemonic, err := walletseed.EncodeMnemonic(ent)
 	if err != nil {
 		return err
 	}
 
-	err = ioutil.WriteFile(filepath.Join(netDir, "seed"), []byte(seedStr), 0644)
+	err = ioutil.WriteFile(filepath.Join(netDir, "seed"), []byte(mnemonic), 0644)
 	if err != nil {
 		return err
 	}
@@ -130,6 +129,11 @@ func createSimulationWallet(cfg *config) error {
 	defer db.Close()
 
 	// Create the wallet.
+	seed, err := walletseed.DecodeUserInput(mnemonic, "")
+	if err != nil {
+		return err
+	}
+
 	err = wallet.Create(db, pubPass, privPass, seed, activeNet.Params)
 	if err != nil {
 		return err

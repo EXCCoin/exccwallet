@@ -19,7 +19,6 @@ package rpcserver
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -2318,12 +2317,12 @@ func (s *seedServer) GenerateRandomSeed(ctx context.Context, req *pb.GenerateRan
 	if seedSize == 0 {
 		seedSize = hdkeychain.RecommendedSeedLen
 	}
-	if seedSize < hdkeychain.MinSeedBytes || seedSize > hdkeychain.MaxSeedBytes {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid seed length")
+
+	seed, err := hdkeychain.GenerateSeed(uint8(seedSize))
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "failed to generate seed: %v", err)
 	}
 
-	seed := make([]byte, seedSize)
-	_, err := rand.Read(seed)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "failed to read cryptographically-random data for seed: %v", err)
 	}
