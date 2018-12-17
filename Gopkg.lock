@@ -39,7 +39,7 @@
     "txscript",
     "wire"
   ]
-  revision = "028c48a51fb365e24db570bb65c64a89e78e5b0e"
+  revision = "6dd76aa28e6d9c05cfa72d747c3e924fa5511a00"
 
 [[projects]]
   branch = "master"
