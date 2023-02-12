@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"decred.org/dcrwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/errors"
 )
 
 var testPrivPass = []byte("private")

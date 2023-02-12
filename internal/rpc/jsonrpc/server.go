@@ -19,12 +19,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"decred.org/dcrwallet/v2/errors"
-	"decred.org/dcrwallet/v2/internal/loader"
-	"decred.org/dcrwallet/v2/rpc/jsonrpc/types"
-	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrjson/v4"
-	dcrdtypes "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/internal/loader"
+	"github.com/EXCCoin/exccwallet/v2/rpc/jsonrpc/types"
+	"github.com/EXCCoin/exccd/chaincfg/v3"
+	"github.com/EXCCoin/exccd/dcrjson/v4"
+	dcrdtypes "github.com/EXCCoin/exccd/rpc/jsonrpc/types/v3"
 	"github.com/gorilla/websocket"
 )
 

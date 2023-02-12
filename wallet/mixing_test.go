@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/decred/dcrd/wire"
+	"github.com/EXCCoin/exccd/wire"
 )
 
 func MsgTxFromHex(hexTx string) (*wire.MsgTx, error) {

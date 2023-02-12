@@ -7,9 +7,9 @@ package dcrd
 import (
 	"encoding/json"
 
-	"decred.org/dcrwallet/v2/errors"
-	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccd/chaincfg/chainhash"
+	"github.com/EXCCoin/exccd/wire"
 )
 
 func unmarshalArray(j json.RawMessage, params ...interface{}) error {

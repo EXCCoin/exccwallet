@@ -9,13 +9,13 @@ import (
 	"math/big"
 	"sort"
 
-	"decred.org/dcrwallet/v2/errors"
-	"decred.org/dcrwallet/v2/wallet/walletdb"
-	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
-	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/gcs/v3"
-	"github.com/decred/dcrd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
+	blockchain "github.com/EXCCoin/exccd/blockchain/standalone/v2"
+	"github.com/EXCCoin/exccd/chaincfg/chainhash"
+	"github.com/EXCCoin/exccd/chaincfg/v3"
+	"github.com/EXCCoin/exccd/gcs/v3"
+	"github.com/EXCCoin/exccd/wire"
 )
 
 // SidechainForest provides in-memory management of sidechain and orphan blocks.

@@ -7,9 +7,9 @@ package udb
 import (
 	"context"
 
-	"decred.org/dcrwallet/v2/errors"
-	"decred.org/dcrwallet/v2/wallet/walletdb"
-	"github.com/decred/dcrd/chaincfg/v3"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
+	"github.com/EXCCoin/exccd/chaincfg/v3"
 )
 
 // Old package namespace bucket keys.  These are still used as of the very first

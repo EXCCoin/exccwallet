@@ -20,7 +20,7 @@ import (
 	"crypto/sha512"
 	"strings"
 
-	"decred.org/dcrwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/errors"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/text/unicode/norm"
 )

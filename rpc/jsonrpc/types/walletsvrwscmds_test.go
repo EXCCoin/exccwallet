@@ -12,7 +12,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/decred/dcrd/dcrjson/v4"
+	"github.com/EXCCoin/exccd/dcrjson/v4"
 )
 
 // TestWalletSvrWsCmds tests all of the wallet server websocket-specific

@@ -10,7 +10,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/decred/dcrd/txscript/v4/stdaddr"
+	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 )
 
 type client struct {

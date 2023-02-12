@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	_ "decred.org/dcrwallet/v2/wallet/drivers/bdb"
-	"decred.org/dcrwallet/v2/wallet/walletdb"
-	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/dcrd/wire"
+	_ "github.com/EXCCoin/exccwallet/v2/wallet/drivers/bdb"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
+	"github.com/EXCCoin/exccd/chaincfg/chainhash"
+	"github.com/EXCCoin/exccd/dcrutil/v4"
+	"github.com/EXCCoin/exccd/wire"
 )
 
 func TestInsertsCreditsDebitsRollbacks(t *testing.T) {

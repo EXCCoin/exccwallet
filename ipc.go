@@ -12,7 +12,7 @@ import (
 	"io"
 	"os"
 
-	"decred.org/dcrwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/errors"
 )
 
 // Messages sent over a pipe are encoded using a simple binary message format:

@@ -13,7 +13,7 @@ import (
 	"io"
 	"runtime/trace"
 
-	"decred.org/dcrwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/errors"
 )
 
 // ReadTx represents a database transaction that can only be used for reads.  If

@@ -10,12 +10,12 @@ import (
 	"runtime/trace"
 	"sync"
 
-	"decred.org/dcrwallet/v2/errors"
-	"decred.org/dcrwallet/v2/internal/vsp"
-	"decred.org/dcrwallet/v2/wallet"
-	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/dcrd/txscript/v4/stdaddr"
-	"github.com/decred/dcrd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/internal/vsp"
+	"github.com/EXCCoin/exccwallet/v2/wallet"
+	"github.com/EXCCoin/exccd/dcrutil/v4"
+	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
+	"github.com/EXCCoin/exccd/wire"
 )
 
 const minconf = 1

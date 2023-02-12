@@ -7,9 +7,9 @@ package udb
 import (
 	"bytes"
 
-	"decred.org/dcrwallet/v2/errors"
-	"decred.org/dcrwallet/v2/wallet/walletdb"
-	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
+	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 )
 
 var (

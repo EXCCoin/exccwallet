@@ -14,9 +14,9 @@ import (
 	"os"
 	"strings"
 
-	"decred.org/dcrwallet/v2/internal/rpchelp"
-	"decred.org/dcrwallet/v2/rpc/jsonrpc/types"
-	"github.com/decred/dcrd/dcrjson/v4"
+	"github.com/EXCCoin/exccwallet/v2/internal/rpchelp"
+	"github.com/EXCCoin/exccwallet/v2/rpc/jsonrpc/types"
+	"github.com/EXCCoin/exccd/dcrjson/v4"
 )
 
 func init() {

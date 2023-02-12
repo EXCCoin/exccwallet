@@ -9,11 +9,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"decred.org/dcrwallet/v2/rpc/client/dcrwallet"
-	"decred.org/dcrwallet/v2/rpc/jsonrpc/types"
-	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/dcrd/rpcclient/v7"
+	"github.com/EXCCoin/exccwallet/v2/rpc/client/dcrwallet"
+	"github.com/EXCCoin/exccwallet/v2/rpc/jsonrpc/types"
+	"github.com/EXCCoin/exccd/chaincfg/v3"
+	"github.com/EXCCoin/exccd/dcrutil/v4"
+	"github.com/EXCCoin/exccd/rpcclient/v7"
 )
 
 const (

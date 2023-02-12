@@ -11,10 +11,10 @@ import (
 	"os"
 	"testing"
 
-	"decred.org/dcrwallet/v2/wallet/walletdb"
-	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/dcrd/txscript/v4/stdaddr"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
+	"github.com/EXCCoin/exccd/chaincfg/v3"
+	"github.com/EXCCoin/exccd/dcrutil/v4"
+	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 )
 
 // expectedAddr is used to house the expected return values from a managed

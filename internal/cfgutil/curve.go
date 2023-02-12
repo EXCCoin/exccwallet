@@ -11,8 +11,8 @@ import (
 	"io"
 	"time"
 
-	"decred.org/dcrwallet/v2/errors"
-	"github.com/decred/dcrd/certgen"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccd/certgen"
 )
 
 // CurveID specifies a recognized curve through a constant value.

@@ -6,8 +6,8 @@
 package udb
 
 import (
-	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/dcrd/txscript/v4/stdaddr"
+	"github.com/EXCCoin/exccd/dcrutil/v4"
+	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 )
 
 // ManagedAddress is an interface that provides acces to information regarding

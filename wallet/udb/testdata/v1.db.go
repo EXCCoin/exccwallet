@@ -14,7 +14,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/decred/dcrd/chaincfg"
+	"github.com/EXCCoin/exccd/chaincfg"
 	"github.com/decred/dcrutil/hdkeychain"
 	_ "github.com/decred/dcrwallet/wallet/internal/bdb"
 	"github.com/decred/dcrwallet/wallet/udb"

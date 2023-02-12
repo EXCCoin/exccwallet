@@ -22,11 +22,11 @@ import (
 	"strings"
 	"time"
 
-	"decred.org/dcrwallet/v2/errors"
-	"decred.org/dcrwallet/v2/internal/cfgutil"
-	"decred.org/dcrwallet/v2/internal/loader"
-	"decred.org/dcrwallet/v2/internal/rpc/jsonrpc"
-	"decred.org/dcrwallet/v2/internal/rpc/rpcserver"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/internal/cfgutil"
+	"github.com/EXCCoin/exccwallet/v2/internal/loader"
+	"github.com/EXCCoin/exccwallet/v2/internal/rpc/jsonrpc"
+	"github.com/EXCCoin/exccwallet/v2/internal/rpc/rpcserver"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

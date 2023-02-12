@@ -11,11 +11,11 @@ import (
 	"io"
 	"strings"
 
-	"decred.org/dcrwallet/v2/errors"
-	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/gcs/v3"
-	blockcf "github.com/decred/dcrd/gcs/v3/blockcf2"
-	"github.com/decred/dcrd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccd/chaincfg/chainhash"
+	"github.com/EXCCoin/exccd/gcs/v3"
+	blockcf "github.com/EXCCoin/exccd/gcs/v3/blockcf2"
+	"github.com/EXCCoin/exccd/wire"
 )
 
 type deserializer interface {

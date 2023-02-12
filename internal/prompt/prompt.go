@@ -14,8 +14,8 @@ import (
 	"strings"
 	"unicode"
 
-	"decred.org/dcrwallet/v2/errors"
-	"decred.org/dcrwallet/v2/walletseed"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/walletseed"
 	"golang.org/x/crypto/ssh/terminal"
 )
 

@@ -12,9 +12,9 @@ import (
 	"os"
 	"testing"
 
-	"decred.org/dcrwallet/v2/errors"
-	_ "decred.org/dcrwallet/v2/wallet/internal/bdb"
-	"decred.org/dcrwallet/v2/wallet/walletdb"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	_ "github.com/EXCCoin/exccwallet/v2/wallet/internal/bdb"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 )
 
 // dbType is the database type name for this driver.

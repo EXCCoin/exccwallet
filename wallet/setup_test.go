@@ -9,11 +9,11 @@ import (
 	"os"
 	"testing"
 
-	_ "decred.org/dcrwallet/v2/wallet/drivers/bdb"
-	"decred.org/dcrwallet/v2/wallet/walletdb"
-	"decred.org/dcrwallet/v2/walletseed"
-	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrutil/v4"
+	_ "github.com/EXCCoin/exccwallet/v2/wallet/drivers/bdb"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
+	"github.com/EXCCoin/exccwallet/v2/walletseed"
+	"github.com/EXCCoin/exccd/chaincfg/v3"
+	"github.com/EXCCoin/exccd/dcrutil/v4"
 )
 
 var basicWalletConfig = Config{

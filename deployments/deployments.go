@@ -7,11 +7,11 @@ package deployments
 import (
 	"context"
 
-	"decred.org/dcrwallet/v2/errors"
-	"decred.org/dcrwallet/v2/rpc/client/dcrd"
-	"github.com/decred/dcrd/chaincfg/v3"
-	dcrdtypes "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
-	"github.com/decred/dcrd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/rpc/client/dcrd"
+	"github.com/EXCCoin/exccd/chaincfg/v3"
+	dcrdtypes "github.com/EXCCoin/exccd/rpc/jsonrpc/types/v3"
+	"github.com/EXCCoin/exccd/wire"
 )
 
 // HardcodedDeployment specifies hardcoded block heights that a deployment

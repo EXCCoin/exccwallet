@@ -10,11 +10,11 @@ package validate
 import (
 	"math"
 
-	"decred.org/dcrwallet/v2/errors"
-	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
-	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/gcs/v3"
-	"github.com/decred/dcrd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	blockchain "github.com/EXCCoin/exccd/blockchain/standalone/v2"
+	"github.com/EXCCoin/exccd/chaincfg/chainhash"
+	"github.com/EXCCoin/exccd/gcs/v3"
+	"github.com/EXCCoin/exccd/wire"
 )
 
 // set for int32 max so it's disabled for now.

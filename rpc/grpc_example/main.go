@@ -9,12 +9,12 @@ import (
 	"io/ioutil"
 	"path/filepath"
 
-	pb "decred.org/dcrwallet/v2/rpc/walletrpc"
+	pb "github.com/EXCCoin/exccwallet/v2/rpc/walletrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/encoding/prototext"
 
-	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/EXCCoin/exccd/dcrutil/v4"
 )
 
 var (

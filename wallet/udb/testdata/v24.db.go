@@ -29,10 +29,10 @@ import (
 	"os"
 	"time"
 
-	_ "decred.org/dcrwallet/v2/wallet/internal/bdb"
-	"decred.org/dcrwallet/v2/wallet/udb"
-	"decred.org/dcrwallet/v2/wallet/walletdb"
-	"github.com/decred/dcrd/chaincfg/v3"
+	_ "github.com/EXCCoin/exccwallet/v2/wallet/internal/bdb"
+	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
+	"github.com/EXCCoin/exccd/chaincfg/v3"
 )
 
 const dbname = "v24.db"

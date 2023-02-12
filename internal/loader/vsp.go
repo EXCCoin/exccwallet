@@ -3,8 +3,8 @@ package loader
 import (
 	"sync"
 
-	"decred.org/dcrwallet/v2/errors"
-	"decred.org/dcrwallet/v2/internal/vsp"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/internal/vsp"
 )
 
 var vspClients = struct {

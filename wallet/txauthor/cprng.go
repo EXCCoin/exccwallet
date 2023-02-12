@@ -8,7 +8,7 @@ import (
 	"crypto/rand"
 	"sync"
 
-	"decred.org/dcrwallet/v2/internal/uniformprng"
+	"github.com/EXCCoin/exccwallet/v2/internal/uniformprng"
 )
 
 // cprng is a cryptographically random-seeded prng.  It is seeded during package
