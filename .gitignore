@@ -1,6 +1,7 @@
 cmd/movefunds/movefunds
 cmd/sweepaccount/sweepaccount
 /dcrwallet
+/exccwallet
 vendor
 *~
 .vscode
