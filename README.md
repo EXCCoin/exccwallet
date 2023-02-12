@@ -1,43 +1,38 @@
-dcrwallet
+exccwallet
 =========
 
-dcrwallet is a daemon handling Decred wallet functionality.  All interaction
-with the wallet is performed over RPC.
+exccwallet is a daemon handling ExchangeCoin wallet functionality for a
+single user.  It acts as both an RPC client to exccd and an RPC server
+for wallet clients and legacy RPC applications.
 
 Public and private keys are derived using the hierarchical
 deterministic format described by
 [BIP0032](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki).
 Unencrypted private keys are not supported and are never written to
-disk.  dcrwallet uses the
+disk.  exccwallet uses the
 `m/44'/<coin type>'/<account>'/<branch>/<address index>`
 HD path for all derived addresses, as described by
 [BIP0044](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki).
 
-dcrwallet provides two modes of operation to connect to the Decred
-network.  The first (and default) is to communicate with a single
-trusted `dcrd` instance using JSON-RPC.  The second is a
-privacy-preserving Simplified Payment Verification (SPV) mode (enabled
-with the `--spv` flag) where the wallet connects either to specified
-peers (with `--spvconnect`) or peers discovered from seeders and other
-peers. Both modes can be switched between with just a restart of the
-wallet.  It is advised to avoid SPV mode for heavily-used wallets
-which require downloading most blocks regardless.
+Due to the sensitive nature of public data in a BIP0032 wallet,
+exccwallet provides the option of encrypting not just private keys, but
+public data as well.  This is intended to thwart privacy risks where a
+wallet file is compromised without exposing all current and future
+addresses (public keys) managed by the wallet. While access to this
+information would not allow an attacker to spend or steal coins, it
+does mean they could track all transactions involving your addresses
+and therefore know your exact balance.  In a future release, public data
+encryption will extend to transactions as well.
 
-Not all functionality is available when running in SPV mode.  Some of
-these features may become available in future versions, but only if a
-consensus vote passes to activate the required changes.  Currently,
-the following features are disabled or unavailable to SPV wallets:
+exccwallet is not an SPV client and requires connecting to a local or
+remote exccd instance for asynchronous blockchain queries and
+notifications over websockets.  Full exccd installation instructions
+can be found [here](https://github.com/EXCCoin/exccd).  An alternative
+SPV mode that is compatible with exccd is planned for a future release.
 
-  * Voting
+Wallet clients can use one of two RPC servers:
 
-  * Revoking tickets before expiry
-
-  * Determining exact number of live and missed tickets (as opposed to
-    simply unspent).
-
-Wallet clients interact with the wallet using one of two RPC servers:
-
-  1. A JSON-RPC server inspired by the Bitcoin Core rpc server
+  1. A legacy JSON-RPC server inspired by the Bitcoin Core rpc server
 
      The JSON-RPC server exists to ease the migration of wallet applications
      from Core, but complete compatibility is not guaranteed.  Some portions of
@@ -49,129 +44,160 @@ Wallet clients interact with the wallet using one of two RPC servers:
 
   2. A gRPC server
 
-     The gRPC server uses a new API built for dcrwallet, but the API is not
+     The gRPC server uses a new API built for exccwallet, but the API is not
      stabilized.  This server is enabled by default and may be disabled with
      the config option `--nogrpc`.  If you don't mind applications breaking
-     due to API changes, don't want to deal with issues of the JSON-RPC API, or
+     due to API changes, don't want to deal with issues of the legacy API, or
      need notifications for changes to the wallet, this is the RPC server to
      use. The gRPC server is documented [here](./rpc/documentation/README.md).
 
-## Installing and updating
+## Installation and updating
 
-### Binaries (Windows/Linux/macOS)
+### Windows - MSIs Available
 
-Binary releases are provided for common operating systems and architectures.
-Please note that dcrwallet is CLI only. It is included in the
-[CLI app suite](https://github.com/decred/decred-release/releases/latest).
-If you would prefer a graphical user interface (GUI) instead, consider
-downloading the GUI wallet [Decrediton](https://github.com/decred/decrediton).
+Install the latest MSIs available here:
 
-https://decred.org/downloads/
+https://github.com/EXCCoin/excc-release/releases
 
-* How to verify binaries before installing: https://docs.decred.org/advanced/verifying-binaries/
-* How to install the CLI Suite: https://docs.decred.org/wallets/cli/cli-installation/
-* How to install Decrediton: https://docs.decred.org/wallets/decrediton/decrediton-setup/
+### Windows/Linux/BSD/POSIX - Build from source
 
-### Build from source (all platforms)
+Building or updating from source requires the following build dependencies:
 
-- **Install Go 1.15 or 1.16**
+- **Go 1.9 or 1.10**
 
-  Installation instructions can be found here: https://golang.org/doc/install.
-  Ensure Go was installed properly and is a supported version:
-  ```sh
-  $ go version
-  $ go env GOROOT GOPATH
-  ```
-  NOTE: `GOROOT` and `GOPATH` must not be on the same path. It is recommended
-  to add `$GOPATH/bin` to your `PATH` according to the Golang.org instructions.
+  Installation instructions can be found here: http://golang.org/doc/install.
+  It is recommended to add `$GOPATH/bin` to your `PATH` at this point.
 
-- **Build or Update dcrwallet**
+- **Dep**
 
-  Since dcrwallet is a single Go module, it's possible to use a single command
-  to download, build, and install without needing to clone the repo. If using Go
-  1.16, run
+  Dep is used to manage project dependencies and provide reproducible builds.
+  It is recommended to use the latest Dep release, unless a bug prevents doing
+  so.  The latest releases (for both binary and source) can be found
+  [here](https://github.com/golang/dep/releases).
 
-  ```sh
-  $ go install decred.org/dcrwallet/v2@master
-  ```
+Unfortunately, the use of `dep` prevents a handy tool such as `go get` from
+automatically downloading, building, and installing the source in a single
+command.  Instead, the latest project and dependency sources must be first
+obtained manually with `git` and `dep`, and then `go` is used to build and
+install the project.
 
-  to build the latest master branch, or:
+**Getting the source**:
 
-  ```sh
-  $ go install decred.org/dcrwallet@latest
-  ```
+For a first time installation, the project and dependency sources can be
+obtained manually with `git` and `dep` (create directories as needed):
 
-  for the latest released version.
+```
+git clone https://github.com/EXCCoin/exccwallet $GOPATH/src/github.com/EXCCoin/exccwallet
+cd $GOPATH/src/github.com/EXCCoin/exccwallet
+dep ensure
+```
 
-  Any version, branch, or tag may be appended following a `@` character after
-  the package name.  The implicit default is to build `@latest`, which is the
-  latest semantic version tag.  Building `@master` will build the latest
-  development version.  The module name, including any `/vN` suffix, must match
-  the `module` line in the `go.mod` at that version.  See `go help install`
-  for more details.
+To update an existing source tree, pull the latest changes and install the
+matching dependencies:
 
-  The `dcrwallet` executable will be installed to `$GOPATH/bin`.  `GOPATH`
-  defaults to `$HOME/go` (or `%USERPROFILE%\go` on Windows).
+```
+cd $GOPATH/src/github.com/EXCCoin/exccwallet
+git pull
+dep ensure
+```
+
+**Building/Installing**:
+
+The `go` tool is used to build or install (to `GOPATH`) the project.  Some
+example build instructions are provided below (all must run from the `exccwallet`
+project directory).
+
+To build and install `exccwallet` and all helper commands (in the `cmd`
+directory) to `$GOPATH/bin/`, as well as installing all compiled packages to
+`$GOPATH/pkg/` (**use this if you are unsure which command to run**):
+
+```
+go install . ./cmd/...
+```
+
+To build a `exccwallet` executable and install it to `$GOPATH/bin/`:
+
+```
+go install
+```
+
+To build a `exccwallet` executable and place it in the current directory:
+
+```
+go build
+```
+
+## Docker
+
+All tests and linters may be run in a docker container using the script `run_tests.sh`.  This script defaults to using the current supported version of go.  You can run it with the major version of go you would like to use as the only arguement to test a previous on a previous version of go (generally ExchangeCoin supports the current version of go and the previous one).
+
+```
+./run_tests.sh 1.9
+```
+
+To run the tests locally without docker:
+
+```
+./run_tests.sh local
+```
 
 ## Getting Started
 
-dcrwallet can connect to the Decred blockchain using either [dcrd](https://github.com/decred/dcrd)
-or by running in [Simple Payment Verification (SPV)](https://docs.decred.org/wallets/spv/)
-mode. Commands should be run in `cmd.exe` or PowerShell on Windows, or any
-terminal emulator on *nix.
+The following instructions detail how to get started with exccwallet connecting
+to a localhost exccd.  Commands should be run in `cmd.exe` or PowerShell on
+Windows, or any terminal emulator on *nix.
+
+- Run the following command to start exccd:
+
+```
+exccd -u rpcuser -P rpcpass
+```
 
 - Run the following command to create a wallet:
 
-```sh
-dcrwallet --create
+```
+exccwallet -u rpcuser -P rpcpass --create
 ```
 
-- To use dcrwallet in SPV mode:
+- Run the following command to start exccwallet:
 
-```sh
-dcrwallet --spv
+```
+exccwallet -u rpcuser -P rpcpass
 ```
 
-dcrwallet will find external full node peers. It will take a few minutes to
-download the blockchain headers and filters, but it will not download full blocks.
+If everything appears to be working, it is recommended at this point to
+copy the sample exccd and exccwallet configurations and update with your
+RPC username and password.
 
-- To use dcrwallet using a localhost dcrd:
-
-You will need to install both [dcrd](https://github.com/decred/dcrd) and
-[dcrctl](https://github.com/decred/dcrctl). `dcrctl` is the client that controls
-`dcrd` and `dcrwallet` via remote procedure call (RPC).
-
-Please follow the instructions in the documentation, beginning with
-[Startup Basics](https://docs.decred.org/wallets/cli/startup-basics/)
-
-## Running Tests
-
-All tests may be run using the script `run_tests.sh`. Generally, Decred only
-supports the current and previous major versions of Go.
-
-```sh
-./run_tests.sh
+PowerShell (Installed from MSI):
+```
+PS> cp "$env:ProgramFiles\EXCCoin\Exccd\sample-exccd.conf" $env:LOCALAPPDATA\Exccd\exccd.conf
+PS> cp "$env:ProgramFiles\EXCCoin\Exccwallet\sample-exccwallet.conf" $env:LOCALAPPDATA\Exccwallet\exccwallet.conf
+PS> $editor $env:LOCALAPPDATA\Exccd\exccd.conf
+PS> $editor $env:LOCALAPPDATA\Exccwallet\exccwallet.conf
 ```
 
-## Contact
+PowerShell (Installed from source):
+```
+PS> cp $env:GOPATH\src\github.com\EXCCoin\exccd\sample-exccd.conf $env:LOCALAPPDATA\Exccd\exccd.conf
+PS> cp $env:GOPATH\src\github.com\EXCCoin\exccwallet\sample-exccwallet.conf $env:LOCALAPPDATA\Exccwallet\exccwallet.conf
+PS> $editor $env:LOCALAPPDATA\Exccd\exccd.conf
+PS> $editor $env:LOCALAPPDATA\Exccwallet\exccwallet.conf
+```
 
-If you have any further questions you can find us at:
-
-https://decred.org/community/
+Linux/BSD/POSIX (Installed from source):
+```bash
+$ cp $GOPATH/src/github.com/EXCCoin/exccd/sample-exccd.conf ~/.exccd/exccd.conf
+$ cp $GOPATH/src/github.com/EXCCoin/exccwallet/sample-exccwallet.conf ~/.exccwallet/exccwallet.conf
+$ $EDITOR ~/.exccd/exccd.conf
+$ $EDITOR ~/.exccwallet/exccwallet.conf
+```
 
 ## Issue Tracker
 
-The [integrated github issue tracker](https://github.com/decred/dcrwallet/issues)
+The [integrated github issue tracker](https://github.com/EXCCoin/exccwallet/issues)
 is used for this project.
-
-## Documentation
-
-The documentation for dcrwallet is a work-in-progress.  It is located in the
-[docs](https://github.com/decred/dcrwallet/tree/master/docs) folder.
-
-Additional documentation can be found on
-[docs.decred.org](https://docs.decred.org/wallets/cli/dcrwallet-setup/).
 
 ## License
 
-dcrwallet is licensed under the liberal ISC License.
+exccwallet is licensed under the liberal ISC License.
