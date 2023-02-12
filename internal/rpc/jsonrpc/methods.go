@@ -8,7 +8,6 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -32,7 +31,6 @@ import (
 	"decred.org/dcrwallet/v2/wallet"
 	"decred.org/dcrwallet/v2/wallet/txauthor"
 	"decred.org/dcrwallet/v2/wallet/txrules"
-	"decred.org/dcrwallet/v2/wallet/txsizes"
 	"decred.org/dcrwallet/v2/wallet/udb"
 	"github.com/decred/dcrd/blockchain/stake/v4"
 	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
@@ -45,7 +43,6 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v3"
 	dcrdtypes "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/txscript/v4"
-	"github.com/decred/dcrd/txscript/v4/sign"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
@@ -156,16 +153,13 @@ var handlers = map[string]handler{
 	"rescanwallet":              {fn: (*Server).rescanWallet},
 	"revoketickets":             {fn: (*Server).revokeTickets},
 	"sendfrom":                  {fn: (*Server).sendFrom},
-	"sendfromtreasury":          {fn: (*Server).sendFromTreasury},
 	"sendmany":                  {fn: (*Server).sendMany},
 	"sendrawtransaction":        {fn: (*Server).sendRawTransaction},
 	"sendtoaddress":             {fn: (*Server).sendToAddress},
 	"sendtomultisig":            {fn: (*Server).sendToMultiSig},
-	"sendtotreasury":            {fn: (*Server).sendToTreasury},
 	"setaccountpassphrase":      {fn: (*Server).setAccountPassphrase},
 	"setdisapprovepercent":      {fn: (*Server).setDisapprovePercent},
 	"settreasurypolicy":         {fn: (*Server).setTreasuryPolicy},
-	"settspendpolicy":           {fn: (*Server).setTSpendPolicy},
 	"settxfee":                  {fn: (*Server).setTxFee},
 	"setvotechoice":             {fn: (*Server).setVoteChoice},
 	"signmessage":               {fn: (*Server).signMessage},
@@ -176,8 +170,6 @@ var handlers = map[string]handler{
 	"syncstatus":                {fn: (*Server).syncStatus},
 	"ticketinfo":                {fn: (*Server).ticketInfo},
 	"ticketsforaddress":         {fn: (*Server).ticketsForAddress},
-	"treasurypolicy":            {fn: (*Server).treasuryPolicy},
-	"tspendpolicy":              {fn: (*Server).tspendPolicy},
 	"unlockaccount":             {fn: (*Server).unlockAccount},
 	"validateaddress":           {fn: (*Server).validateAddress},
 	"validatepredcp0005cf":      {fn: (*Server).validatePreDCP0005CF},
@@ -1575,18 +1567,6 @@ func createVinList(mtx *wire.MsgTx, isTreasuryEnabled bool) []dcrdtypes.Vin {
 		return vinList
 	}
 
-	// Treasury spend transactions only have a single txin by definition.
-	if isTreasuryEnabled && stake.IsTSpend(mtx) {
-		txIn := mtx.TxIn[0]
-		vinEntry := &vinList[0]
-		vinEntry.TreasurySpend = hex.EncodeToString(txIn.SignatureScript)
-		vinEntry.Sequence = txIn.Sequence
-		vinEntry.AmountIn = dcrutil.Amount(txIn.ValueIn).ToCoin()
-		vinEntry.BlockHeight = txIn.BlockHeight
-		vinEntry.BlockIndex = txIn.BlockIndex
-		return vinList
-	}
-
 	// Stakebase transactions (votes) have two inputs: a null stake base
 	// followed by an input consuming a ticket's stakesubmission.
 	isSSGen := stake.IsSSGen(mtx, isTreasuryEnabled)
@@ -2057,7 +2037,7 @@ func (s *Server) importPrivKey(ctx context.Context, icmd interface{}) (interface
 		return nil, errNotImportedAccount
 	}
 
-	wif, err := dcrutil.DecodeWIF(cmd.PrivKey, w.ChainParams().PrivateKeyID)
+	wif, err := dcrutil.DecodeWIF(cmd.PrivKey)
 	if err != nil {
 		return nil, rpcErrorf(dcrjson.ErrRPCInvalidAddressOrKey, "WIF decode failed: %v", err)
 	}
@@ -2651,7 +2631,7 @@ func (s *Server) getTransaction(ctx context.Context, icmd interface{}) (interfac
 		Time:            txd.Received.Unix(),
 		TimeReceived:    txd.Received.Unix(),
 		WalletConflicts: []string{}, // Not saved
-		//Generated:     compat.IsEitherCoinBaseTx(&details.MsgTx),
+		// Generated:     compat.IsEitherCoinBaseTx(&details.MsgTx),
 	}
 
 	if txd.Block.Height != -1 {
@@ -2971,14 +2951,17 @@ func (s *Server) listLockUnspent(ctx context.Context, icmd interface{}) (interfa
 
 // listReceivedByAccount handles a listreceivedbyaccount request by returning
 // a slice of objects, each one containing:
-//  "account": the receiving account;
-//  "amount": total amount received by the account;
-//  "confirmations": number of confirmations of the most recent transaction.
+//
+//	"account": the receiving account;
+//	"amount": total amount received by the account;
+//	"confirmations": number of confirmations of the most recent transaction.
+//
 // It takes two parameters:
-//  "minconf": minimum number of confirmations to consider a transaction -
-//             default: one;
-//  "includeempty": whether or not to include addresses that have no transactions -
-//                  default: false.
+//
+//	"minconf": minimum number of confirmations to consider a transaction -
+//	           default: one;
+//	"includeempty": whether or not to include addresses that have no transactions -
+//	                default: false.
 func (s *Server) listReceivedByAccount(ctx context.Context, icmd interface{}) (interface{}, error) {
 	cmd := icmd.(*types.ListReceivedByAccountCmd)
 	w, ok := s.walletLoader.LoadedWallet()
@@ -3004,15 +2987,18 @@ func (s *Server) listReceivedByAccount(ctx context.Context, icmd interface{}) (i
 
 // listReceivedByAddress handles a listreceivedbyaddress request by returning
 // a slice of objects, each one containing:
-//  "account": the account of the receiving address;
-//  "address": the receiving address;
-//  "amount": total amount received by the address;
-//  "confirmations": number of confirmations of the most recent transaction.
+//
+//	"account": the account of the receiving address;
+//	"address": the receiving address;
+//	"amount": total amount received by the address;
+//	"confirmations": number of confirmations of the most recent transaction.
+//
 // It takes two parameters:
-//  "minconf": minimum number of confirmations to consider a transaction -
-//             default: one;
-//  "includeempty": whether or not to include addresses that have no transactions -
-//                  default: false.
+//
+//	"minconf": minimum number of confirmations to consider a transaction -
+//	           default: one;
+//	"includeempty": whether or not to include addresses that have no transactions -
+//	                default: false.
 func (s *Server) listReceivedByAddress(ctx context.Context, icmd interface{}) (interface{}, error) {
 	cmd := icmd.(*types.ListReceivedByAddressCmd)
 	w, ok := s.walletLoader.LoadedWallet()
@@ -3612,239 +3598,6 @@ func (s *Server) sendPairs(ctx context.Context, w *wallet.Wallet, amounts map[st
 	return txSha.String(), nil
 }
 
-// sendAmountToTreasury creates and sends payment transactions to the treasury.
-// It returns the transaction hash in string format upon success All errors are
-// returned in dcrjson.RPCError format
-func (s *Server) sendAmountToTreasury(ctx context.Context, w *wallet.Wallet, amount dcrutil.Amount, account uint32, minconf int32) (string, error) {
-	changeAccount := account
-	if s.cfg.CSPPServer != "" {
-		mixAccount, err := w.AccountNumber(ctx, s.cfg.MixAccount)
-		if err != nil {
-			return "", err
-		}
-		if account == mixAccount {
-			changeAccount, err = w.AccountNumber(ctx,
-				s.cfg.MixChangeAccount)
-			if err != nil {
-				return "", err
-			}
-		}
-	}
-
-	outputs := []*wire.TxOut{
-		{
-			Value:    int64(amount),
-			PkScript: []byte{txscript.OP_TADD},
-			Version:  wire.DefaultPkScriptVersion,
-		},
-	}
-	txSha, err := w.SendOutputsToTreasury(ctx, outputs, account,
-		changeAccount, minconf)
-	if err != nil {
-		if errors.Is(err, errors.Locked) {
-			return "", errWalletUnlockNeeded
-		}
-		if errors.Is(err, errors.InsufficientBalance) {
-			return "", rpcError(dcrjson.ErrRPCWalletInsufficientFunds,
-				err)
-		}
-		return "", err
-	}
-
-	return txSha.String(), nil
-}
-
-// sendOutputsFromTreasury creates and sends payment transactions from the treasury.
-// It returns the transaction hash in string format upon success All errors are
-// returned in dcrjson.RPCError format
-func (s *Server) sendOutputsFromTreasury(ctx context.Context, w *wallet.Wallet, cmd types.SendFromTreasuryCmd) (string, error) {
-	// Look to see if the we have the private key imported.
-	publicKey, err := decodeAddress(cmd.Key, w.ChainParams())
-	if err != nil {
-		return "", err
-	}
-	privKey, zero, err := w.LoadPrivateKey(ctx, publicKey)
-	if err != nil {
-		return "", err
-	}
-	defer zero()
-
-	_, tipHeight := w.MainChainTip(ctx)
-
-	// OP_RETURN <8 Bytes ValueIn><24 byte random>. The encoded ValueIn is
-	// added at the end of this function.
-	var payload [32]byte
-	_, err = rand.Read(payload[8:])
-	if err != nil {
-		return "", rpcErrorf(dcrjson.ErrRPCInternal.Code,
-			"sendOutputsFromTreasury Read: %v", err)
-	}
-	builder := txscript.NewScriptBuilder()
-	builder.AddOp(txscript.OP_RETURN)
-	builder.AddData(payload[:])
-	opretScript, err := builder.Script()
-	if err != nil {
-		return "", rpcErrorf(dcrjson.ErrRPCInternal.Code,
-			"sendOutputsFromTreasury NewScriptBuilder: %v", err)
-	}
-	msgTx := wire.NewMsgTx()
-	msgTx.Version = wire.TxVersionTreasury
-	msgTx.AddTxOut(wire.NewTxOut(0, opretScript))
-
-	// Calculate expiry.
-	msgTx.Expiry = blockchain.CalcTSpendExpiry(int64(tipHeight+1),
-		w.ChainParams().TreasuryVoteInterval,
-		w.ChainParams().TreasuryVoteIntervalMultiplier)
-
-	// OP_TGEN and calculate totals.
-	var totalPayout dcrutil.Amount
-	for address, amount := range cmd.Amounts {
-		amt, err := dcrutil.NewAmount(amount)
-		if err != nil {
-			return "", rpcError(dcrjson.ErrRPCInvalidParameter, err)
-		}
-
-		// While looping calculate total amount
-		totalPayout += amt
-
-		// Decode address.
-		addr, err := decodeStakeAddress(address, w.ChainParams())
-		if err != nil {
-			return "", err
-		}
-
-		// Create OP_TGEN prefixed script.
-		vers, script := addr.PayFromTreasuryScript()
-
-		// Make sure this is not dust.
-		txOut := &wire.TxOut{
-			Value:    int64(amt),
-			Version:  vers,
-			PkScript: script,
-		}
-		if txrules.IsDustOutput(txOut, w.RelayFee()) {
-			return "", rpcErrorf(dcrjson.ErrRPCInvalidParameter,
-				"Amount is dust: %v %v", addr, amt)
-		}
-
-		// Add to transaction.
-		msgTx.AddTxOut(txOut)
-	}
-
-	// Calculate fee. Inputs are <signature> <compressed key> OP_TSPEND.
-	estimatedFee := txsizes.EstimateSerializeSize([]int{txsizes.TSPENDInputSize},
-		msgTx.TxOut, 0)
-	fee := txrules.FeeForSerializeSize(w.RelayFee(), estimatedFee)
-
-	// Assemble TxIn.
-	msgTx.AddTxIn(&wire.TxIn{
-		// Stakebase transactions have no inputs, so previous outpoint
-		// is zero hash and max index.
-		PreviousOutPoint: *wire.NewOutPoint(&chainhash.Hash{},
-			wire.MaxPrevOutIndex, wire.TxTreeRegular),
-		Sequence:        wire.MaxTxInSequenceNum,
-		ValueIn:         int64(fee) + int64(totalPayout),
-		BlockHeight:     wire.NullBlockHeight,
-		BlockIndex:      wire.NullBlockIndex,
-		SignatureScript: []byte{}, // Empty for now
-	})
-
-	// Encode total amount in first 8 bytes of TxOut[0] OP_RETURN.
-	binary.LittleEndian.PutUint64(msgTx.TxOut[0].PkScript[2:2+8],
-		uint64(fee)+uint64(totalPayout))
-
-	// Calculate TSpend signature without SigHashType.
-	privKeyBytes := privKey.Serialize()
-	sigscript, err := sign.TSpendSignatureScript(msgTx, privKeyBytes)
-	if err != nil {
-		return "", err
-	}
-	msgTx.TxIn[0].SignatureScript = sigscript
-
-	_, _, err = stake.CheckTSpend(msgTx)
-	if err != nil {
-		return "", err
-	}
-
-	// Send to dcrd.
-	n, ok := s.walletLoader.NetworkBackend()
-	if !ok {
-		return "", errNoNetwork
-	}
-	err = n.PublishTransactions(ctx, msgTx)
-	if err != nil {
-		return "", err
-	}
-
-	return msgTx.TxHash().String(), nil
-}
-
-// treasuryPolicy returns voting policies for treasury spends by a particular
-// key.  If a key is specified, that policy is returned; otherwise the policies
-// for all keys are returned in an array.  If both a key and ticket hash are
-// provided, the per-ticket key policy is returned.
-func (s *Server) treasuryPolicy(ctx context.Context, icmd interface{}) (interface{}, error) {
-	cmd := icmd.(*types.TreasuryPolicyCmd)
-	w, ok := s.walletLoader.LoadedWallet()
-	if !ok {
-		return nil, errUnloadedWallet
-	}
-
-	var ticketHash *chainhash.Hash
-	if cmd.Ticket != nil && *cmd.Ticket != "" {
-		var err error
-		ticketHash, err = chainhash.NewHashFromStr(*cmd.Ticket)
-		if err != nil {
-			return nil, rpcError(dcrjson.ErrRPCDecodeHexString, err)
-		}
-	}
-
-	if cmd.Key != nil && *cmd.Key != "" {
-		pikey, err := hex.DecodeString(*cmd.Key)
-		if err != nil {
-			return nil, rpcError(dcrjson.ErrRPCDecodeHexString, err)
-		}
-		var policy string
-		switch w.TreasuryKeyPolicy(pikey, ticketHash) {
-		case stake.TreasuryVoteYes:
-			policy = "yes"
-		case stake.TreasuryVoteNo:
-			policy = "no"
-		default:
-			policy = "abstain"
-		}
-		res := &types.TreasuryPolicyResult{
-			Key:    *cmd.Key,
-			Policy: policy,
-		}
-		if cmd.Ticket != nil {
-			res.Ticket = *cmd.Ticket
-		}
-		return res, nil
-	}
-
-	policies := w.TreasuryKeyPolicies()
-	res := make([]types.TreasuryPolicyResult, 0, len(policies))
-	for i := range policies {
-		var policy string
-		switch policies[i].Policy {
-		case stake.TreasuryVoteYes:
-			policy = "yes"
-		case stake.TreasuryVoteNo:
-			policy = "no"
-		}
-		r := types.TreasuryPolicyResult{
-			Key:    hex.EncodeToString(policies[i].PiKey),
-			Policy: policy,
-		}
-		if policies[i].Ticket != nil {
-			r.Ticket = policies[i].Ticket.String()
-		}
-		res = append(res, r)
-	}
-	return res, nil
-}
-
 // setDisapprovePercent sets the wallet's disapprove percentage.
 func (s *Server) setDisapprovePercent(ctx context.Context, icmd interface{}) (interface{}, error) {
 	if s.activeNet.Net == wire.MainNet {
@@ -3921,139 +3674,6 @@ func (s *Server) setTreasuryPolicy(ctx context.Context, icmd interface{}) (inter
 	}
 	err = s.updateVSPVoteChoices(ctx, w, ticketHash, nil, nil, policyMap)
 
-	return nil, err
-}
-
-// tspendPolicy returns voting policies for particular treasury spends
-// transactions.  If a tspend transaction hash is specified, that policy is
-// returned; otherwise the policies for all known tspends are returned in an
-// array.  If both a tspend transaction hash and a ticket hash are provided,
-// the per-ticket tspend policy is returned.
-func (s *Server) tspendPolicy(ctx context.Context, icmd interface{}) (interface{}, error) {
-	cmd := icmd.(*types.TSpendPolicyCmd)
-	w, ok := s.walletLoader.LoadedWallet()
-	if !ok {
-		return nil, errUnloadedWallet
-	}
-
-	var ticketHash *chainhash.Hash
-	if cmd.Ticket != nil && *cmd.Ticket != "" {
-		var err error
-		ticketHash, err = chainhash.NewHashFromStr(*cmd.Ticket)
-		if err != nil {
-			return nil, rpcError(dcrjson.ErrRPCDecodeHexString, err)
-		}
-	}
-
-	if cmd.Hash != nil && *cmd.Hash != "" {
-		hash, err := chainhash.NewHashFromStr(*cmd.Hash)
-		if err != nil {
-			return nil, rpcError(dcrjson.ErrRPCDecodeHexString, err)
-		}
-		var policy string
-		switch w.TSpendPolicy(hash, ticketHash) {
-		case stake.TreasuryVoteYes:
-			policy = "yes"
-		case stake.TreasuryVoteNo:
-			policy = "no"
-		default:
-			policy = "abstain"
-		}
-		res := &types.TSpendPolicyResult{
-			Hash:   *cmd.Hash,
-			Policy: policy,
-		}
-		if cmd.Ticket != nil {
-			res.Ticket = *cmd.Ticket
-		}
-		return res, nil
-	}
-
-	tspends := w.GetAllTSpends(ctx)
-	res := make([]types.TSpendPolicyResult, 0, len(tspends))
-	for i := range tspends {
-		tspendHash := tspends[i].TxHash()
-		p := w.TSpendPolicy(&tspendHash, ticketHash)
-
-		var policy string
-		switch p {
-		case stake.TreasuryVoteYes:
-			policy = "yes"
-		case stake.TreasuryVoteNo:
-			policy = "no"
-		}
-		r := types.TSpendPolicyResult{
-			Hash:   tspendHash.String(),
-			Policy: policy,
-		}
-		if cmd.Ticket != nil {
-			r.Ticket = *cmd.Ticket
-		}
-		res = append(res, r)
-	}
-	return res, nil
-}
-
-// setTSpendPolicy saves the voting policy for a particular tspend transaction
-// hash, and optionally, setting the tspend policy used by a specific ticket.
-//
-// If a VSP host is configured in the application settings, the voting
-// preferences will also be set with the VSP.
-func (s *Server) setTSpendPolicy(ctx context.Context, icmd interface{}) (interface{}, error) {
-	cmd := icmd.(*types.SetTSpendPolicyCmd)
-	w, ok := s.walletLoader.LoadedWallet()
-	if !ok {
-		return nil, errUnloadedWallet
-	}
-
-	if len(cmd.Hash) != chainhash.MaxHashStringSize {
-		err := fmt.Errorf("invalid tspend hash length, expected %d got %d",
-			chainhash.MaxHashStringSize, len(cmd.Hash))
-		return nil, rpcError(dcrjson.ErrRPCDecodeHexString, err)
-	}
-
-	hash, err := chainhash.NewHashFromStr(cmd.Hash)
-	if err != nil {
-		return nil, rpcError(dcrjson.ErrRPCDecodeHexString, err)
-	}
-
-	var ticketHash *chainhash.Hash
-	if cmd.Ticket != nil && *cmd.Ticket != "" {
-		if len(*cmd.Ticket) != chainhash.MaxHashStringSize {
-			err := fmt.Errorf("invalid ticket hash length, expected %d got %d",
-				chainhash.MaxHashStringSize, len(*cmd.Ticket))
-			return nil, rpcError(dcrjson.ErrRPCDecodeHexString, err)
-		}
-		var err error
-		ticketHash, err = chainhash.NewHashFromStr(*cmd.Ticket)
-		if err != nil {
-			return nil, rpcError(dcrjson.ErrRPCDecodeHexString, err)
-		}
-	}
-
-	var policy stake.TreasuryVoteT
-	switch cmd.Policy {
-	case "abstain", "invalid", "":
-		policy = stake.TreasuryVoteInvalid
-	case "yes":
-		policy = stake.TreasuryVoteYes
-	case "no":
-		policy = stake.TreasuryVoteNo
-	default:
-		err := fmt.Errorf("unknown policy %q", cmd.Policy)
-		return nil, rpcError(dcrjson.ErrRPCInvalidParameter, err)
-	}
-
-	err = w.SetTSpendPolicy(ctx, hash, policy, ticketHash)
-	if err != nil {
-		return nil, err
-	}
-
-	// Update voting preferences on VSPs if required.
-	policyMap := map[string]string{
-		cmd.Hash: cmd.Policy,
-	}
-	err = s.updateVSPVoteChoices(ctx, w, ticketHash, nil, policyMap, nil)
 	return nil, err
 }
 
@@ -4615,44 +4235,6 @@ func (s *Server) sendRawTransaction(ctx context.Context, icmd interface{}) (inte
 	return txHash.String(), nil
 }
 
-// sendToTreasury handles a sendtotreasury RPC request by creating a new
-// transaction spending unspent transaction outputs for a wallet to the
-// treasury.  Leftover inputs not sent to the payment address or a fee for the
-// miner are sent back to a new address in the wallet.  Upon success, the TxID
-// for the created transaction is returned.
-func (s *Server) sendToTreasury(ctx context.Context, icmd interface{}) (interface{}, error) {
-	cmd := icmd.(*types.SendToTreasuryCmd)
-	w, ok := s.walletLoader.LoadedWallet()
-	if !ok {
-		return nil, errUnloadedWallet
-	}
-
-	amt, err := dcrutil.NewAmount(cmd.Amount)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check that signed integer parameters are positive.
-	if amt <= 0 {
-		return nil, rpcErrorf(dcrjson.ErrRPCInvalidParameter, "negative amount")
-	}
-
-	// sendtotreasury always spends from the default account.
-	return s.sendAmountToTreasury(ctx, w, amt, udb.DefaultAccountNum, 1)
-}
-
-// transaction spending treasury balance.
-// Upon success, the TxID for the created transaction is returned.
-func (s *Server) sendFromTreasury(ctx context.Context, icmd interface{}) (interface{}, error) {
-	cmd := icmd.(*types.SendFromTreasuryCmd)
-	w, ok := s.walletLoader.LoadedWallet()
-	if !ok {
-		return nil, errUnloadedWallet
-	}
-
-	return s.sendOutputsFromTreasury(ctx, w, *cmd)
-}
-
 // setTxFee sets the transaction fee per kilobyte added to transactions.
 func (s *Server) setTxFee(ctx context.Context, icmd interface{}) (interface{}, error) {
 	cmd := icmd.(*types.SetTxFeeCmd)
@@ -4930,7 +4512,7 @@ func (s *Server) signRawTransaction(ctx context.Context, icmd interface{}) (inte
 		keys = make(map[string]*dcrutil.WIF)
 
 		for _, key := range *cmd.PrivKeys {
-			wif, err := dcrutil.DecodeWIF(key, w.ChainParams().PrivateKeyID)
+			wif, err := dcrutil.DecodeWIF(key)
 			if err != nil {
 				return nil, rpcError(dcrjson.ErrRPCDeserialization, err)
 			}

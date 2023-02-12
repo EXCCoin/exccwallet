@@ -29,7 +29,7 @@ var (
 	privPass = []byte("private")
 )
 
-var chainParams = &chaincfg.TestNet2Params
+var chainParams = &chaincfg.TestNetParams
 
 func main() {
 	err := setup()
@@ -50,7 +50,7 @@ func setup() error {
 		return err
 	}
 	defer db.Close()
-	seed, err := walletseed.GenerateRandomSeed(hdkeychain.RecommendedSeedLen)
+	seed, err := walletseed.GenerateRandomEntropy(walletseed.RecommendedEntLen)
 	if err != nil {
 		return err
 	}

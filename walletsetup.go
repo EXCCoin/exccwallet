@@ -21,7 +21,6 @@ import (
 	"decred.org/dcrwallet/v2/walletseed"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 )
@@ -57,7 +56,6 @@ func createWallet(ctx context.Context, cfg *config) error {
 		cfg.MixSplitLimit)
 
 	var privPass, pubPass, seed []byte
-	var imported bool
 	var err error
 	c := make(chan struct{}, 1)
 	go func() {
@@ -87,7 +85,7 @@ func createWallet(ctx context.Context, cfg *config) error {
 		// automatically generated value the user has already confirmed or a
 		// value the user has entered which has already been validated.
 		// There is no config flag to set the seed.
-		seed, imported, err = prompt.Seed(r)
+		seed, _, err = prompt.Seed(r)
 	}()
 	select {
 	case <-ctx.Done():
@@ -102,17 +100,6 @@ func createWallet(ctx context.Context, cfg *config) error {
 	w, err := loader.CreateNewWallet(ctx, pubPass, privPass, seed)
 	if err != nil {
 		return err
-	}
-
-	// Upgrade to the SLIP0044 cointype if this is a new (rather than
-	// user-provided) seed, and also unconditionally on simnet (to prevent
-	// the mining address printed below from ever becoming invalid if a
-	// cointype upgrade occurred later).
-	if !imported || cfg.SimNet {
-		err := w.UpgradeToSLIP0044CoinType(ctx)
-		if err != nil {
-			return err
-		}
 	}
 
 	// Display a mining address when creating a simnet wallet.
@@ -156,18 +143,22 @@ func createSimulationWallet(ctx context.Context, cfg *config) error {
 	// Public passphrase is the default.
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
-	// Generate a random seed.
-	seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
+	// Generate a random ent.
+	ent, err := walletseed.GenerateRandomEntropy(walletseed.RecommendedEntLen)
 	if err != nil {
 		return err
 	}
 
 	netDir := networkDir(cfg.AppDataDir.Value, activeNet.Params)
 
-	// Write the seed to disk, so that we can restore it later
+	// Write the ent to disk, so that we can restore it later
 	// if need be, for testing purposes.
-	seedStr := walletseed.EncodeMnemonic(seed)
-	err = os.WriteFile(filepath.Join(netDir, "seed"), []byte(seedStr), 0644)
+	mnemonic, err := walletseed.EncodeMnemonic(ent)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(filepath.Join(netDir, "seed"), []byte(mnemonic), 0644)
 	if err != nil {
 		return err
 	}
@@ -184,6 +175,11 @@ func createSimulationWallet(ctx context.Context, cfg *config) error {
 	defer db.Close()
 
 	// Create the wallet.
+	seed, err := walletseed.DecodeUserInput(mnemonic, "")
+	if err != nil {
+		return err
+	}
+
 	err = wallet.Create(ctx, db, pubPass, privPass, seed, activeNet.Params)
 	if err != nil {
 		return err

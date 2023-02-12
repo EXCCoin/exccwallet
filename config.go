@@ -34,11 +34,11 @@ import (
 )
 
 const (
-	defaultCAFilename              = "dcrd.cert"
-	defaultConfigFilename          = "dcrwallet.conf"
+	defaultCAFilename              = "exccd.cert"
+	defaultConfigFilename          = "exccwallet.conf"
 	defaultLogLevel                = "info"
 	defaultLogDirname              = "logs"
-	defaultLogFilename             = "dcrwallet.log"
+	defaultLogFilename             = "exccwallet.log"
 	defaultLogSize                 = "10M"
 	defaultRPCMaxClients           = 10
 	defaultRPCMaxWebsockets        = 25
@@ -65,8 +65,8 @@ const (
 )
 
 var (
-	dcrdDefaultCAFile      = filepath.Join(dcrutil.AppDataDir("dcrd", false), "rpc.cert")
-	defaultAppDataDir      = dcrutil.AppDataDir("dcrwallet", false)
+	dcrdDefaultCAFile      = filepath.Join(dcrutil.AppDataDir("exccd", false), "rpc.cert")
+	defaultAppDataDir      = dcrutil.AppDataDir("exccwallet", false)
 	defaultConfigFile      = filepath.Join(defaultAppDataDir, defaultConfigFilename)
 	defaultRPCKeyFile      = filepath.Join(defaultAppDataDir, "rpc.key")
 	defaultRPCCertFile     = filepath.Join(defaultAppDataDir, "rpc.cert")
@@ -317,10 +317,10 @@ func parseAndSetDebugLevels(debugLevel string) error {
 // line options.
 //
 // The configuration proceeds as follows:
-//      1) Start with a default config with sane settings
-//      2) Pre-parse the command line to check for an alternative config file
-//      3) Load configuration file overwriting defaults with any specified options
-//      4) Parse CLI options and overwrite/add any specified options
+//  1. Start with a default config with sane settings
+//  2. Pre-parse the command line to check for an alternative config file
+//  3. Load configuration file overwriting defaults with any specified options
+//  4. Parse CLI options and overwrite/add any specified options
 //
 // The above results in dcrwallet functioning properly without any config
 // settings while still allowing the user to override settings with config files

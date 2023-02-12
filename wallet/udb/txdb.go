@@ -18,7 +18,6 @@ import (
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/crypto/ripemd160"
 	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -741,8 +740,6 @@ func keyCredit(txHash *chainhash.Hash, index uint32, block *Block) []byte {
 
 func condenseOpCode(opCode uint8) byte {
 	switch {
-	case opCode == txscript.OP_TGEN:
-		return 0x1c
 	default:
 		// Original behavior. Compresses the txscript OP_SS* opcode to
 		// an appropriate flag value.
@@ -751,12 +748,7 @@ func condenseOpCode(opCode uint8) byte {
 }
 
 func expandOpCode(opCodeFlag byte) uint8 {
-	// Bits used by the stake opcode flag.
-	mask := byte(0x1c)
-
 	switch {
-	case opCodeFlag&mask == 0x1c:
-		return txscript.OP_TGEN
 	default:
 		// Original behavior. This cashes out to one of the OP_SS***
 		// opcode constants.
@@ -1001,21 +993,21 @@ func deleteRawCredit(ns walletdb.ReadWriteBucket, k []byte) error {
 //
 // Example usage:
 //
-//   prefix := keyTxRecord(txHash, block)
-//   it := makeCreditIterator(ns, prefix)
-//   for it.next() {
-//           // Use it.elem
-//           // If necessary, read additional details from it.ck, it.cv
-//   }
-//   if it.err != nil {
-//           // Handle error
-//   }
+//	prefix := keyTxRecord(txHash, block)
+//	it := makeCreditIterator(ns, prefix)
+//	for it.next() {
+//	        // Use it.elem
+//	        // If necessary, read additional details from it.ck, it.cv
+//	}
+//	if it.err != nil {
+//	        // Handle error
+//	}
 //
 // The elem's Spent field is not set to true if the credit is spent by an
 // unmined transaction.  To check for this case:
 //
-//   k := canonicalOutPoint(&txHash, it.elem.Index)
-//   it.elem.Spent = existsRawUnminedInput(ns, k) != nil
+//	k := canonicalOutPoint(&txHash, it.elem.Index)
+//	it.elem.Spent = existsRawUnminedInput(ns, k) != nil
 type creditIterator struct {
 	c         walletdb.ReadWriteCursor // Set to nil after final iteration
 	dbVersion uint32
@@ -1281,15 +1273,15 @@ func deleteRawDebit(ns walletdb.ReadWriteBucket, k []byte) error {
 //
 // Example usage:
 //
-//   prefix := keyTxRecord(txHash, block)
-//   it := makeDebitIterator(ns, prefix)
-//   for it.next() {
-//           // Use it.elem
-//           // If necessary, read additional details from it.ck, it.cv
-//   }
-//   if it.err != nil {
-//           // Handle error
-//   }
+//	prefix := keyTxRecord(txHash, block)
+//	it := makeDebitIterator(ns, prefix)
+//	for it.next() {
+//	        // Use it.elem
+//	        // If necessary, read additional details from it.ck, it.cv
+//	}
+//	if it.err != nil {
+//	        // Handle error
+//	}
 type debitIterator struct {
 	c      walletdb.ReadWriteCursor // Set to nil after final iteration
 	prefix []byte
@@ -1420,30 +1412,29 @@ func deleteUnpublished(ns walletdb.ReadWriteBucket, k []byte) error {
 
 // Unmined transaction credits use the canonical serialization format:
 //
-//  [0:32]   Transaction hash (32 bytes)
-//  [32:36]  Output index (4 bytes)
+//	[0:32]   Transaction hash (32 bytes)
+//	[32:36]  Output index (4 bytes)
 //
 // The value matches the format used by mined credits, but the spent flag is
 // never set and the optional debit record is never included.  The simplified
 // format is thus:
 //
-//   [0:8]   Amount (8 bytes)
-//   [8]     Flags (1 byte)
-//             0x01: Unused
-//             0x02: Change
-//             0x1c: P2PKH stake flag
-//                 0x00: None (translates to OP_NOP10)
-//                 0x04: OP_SSTX
-//                 0x08: OP_SSGEN
-//                 0x0c: OP_SSRTX
-//                 0x10: OP_SSTXCHANGE
-//             0x20: IsCoinbase
-//             0x40: HasExpiry
-//   [9] Script type (P2PKH, P2SH, etc) and bit flag for account stored
-//   [10:14] Byte index (4 bytes, uint32)
-//   [14:18] Length of script (4 bytes, uint32)
-//   [18:22] Account (4 bytes, uint32)
-//
+//	[0:8]   Amount (8 bytes)
+//	[8]     Flags (1 byte)
+//	          0x01: Unused
+//	          0x02: Change
+//	          0x1c: P2PKH stake flag
+//	              0x00: None (translates to OP_NOP10)
+//	              0x04: OP_SSTX
+//	              0x08: OP_SSGEN
+//	              0x0c: OP_SSRTX
+//	              0x10: OP_SSTXCHANGE
+//	          0x20: IsCoinbase
+//	          0x40: HasExpiry
+//	[9] Script type (P2PKH, P2SH, etc) and bit flag for account stored
+//	[10:14] Byte index (4 bytes, uint32)
+//	[14:18] Length of script (4 bytes, uint32)
+//	[18:22] Account (4 bytes, uint32)
 const (
 	// unconfCreditKeySize is the total size of an unconfirmed credit
 	// key in bytes.
@@ -1576,22 +1567,22 @@ func deleteRawUnminedCredit(ns walletdb.ReadWriteBucket, k []byte) error {
 // unminedCreditIterator allows for cursor iteration over all credits, in order,
 // from a single unmined transaction.
 //
-//  Example usage:
+//	Example usage:
 //
-//   it := makeUnminedCreditIterator(ns, txHash)
-//   for it.next() {
-//           // Use it.elem, it.ck and it.cv
-//           // Optionally, use it.delete() to remove this k/v pair
-//   }
-//   if it.err != nil {
-//           // Handle error
-//   }
+//	 it := makeUnminedCreditIterator(ns, txHash)
+//	 for it.next() {
+//	         // Use it.elem, it.ck and it.cv
+//	         // Optionally, use it.delete() to remove this k/v pair
+//	 }
+//	 if it.err != nil {
+//	         // Handle error
+//	 }
 //
 // The spentness of the credit is not looked up for performance reasons (because
 // for unspent credits, it requires another lookup in another bucket).  If this
 // is needed, it may be checked like this:
 //
-//   spent := existsRawUnminedInput(ns, it.ck) != nil
+//	spent := existsRawUnminedInput(ns, it.ck) != nil
 type unminedCreditIterator struct {
 	c         walletdb.ReadWriteCursor
 	dbVersion uint32
@@ -1760,8 +1751,10 @@ func extractRawTicketPickedHeight(v []byte) int32 {
 // [20]      m (in m-of-n) (uint8)
 // [21]      n (in m-of-n) (uint8)
 // [22]      Flags (1 byte)
-//           [0]: Spent
-//           [1]: Tree
+//
+//	[0]: Spent
+//	[1]: Tree
+//
 // [23:55]   Block hash (32 byte hash)
 // [55:59]   Block height (uint32)
 // [59:67]   Amount (int64)

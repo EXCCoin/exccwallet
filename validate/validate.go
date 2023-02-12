@@ -8,6 +8,8 @@ Package validate provides context-free consensus validation.
 package validate
 
 import (
+	"math"
+
 	"decred.org/dcrwallet/v2/errors"
 	blockchain "github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -15,14 +17,16 @@ import (
 	"github.com/decred/dcrd/wire"
 )
 
+// set for int32 max so it's disabled for now.
+// TODO: should be set to correct values when DCP0005 for EXCC is enabled
 const (
 	// DCP0005ActiveHeightTestNet3 is the height of activation for DCP0005
 	// in TestNet3.
-	DCP0005ActiveHeightTestNet3 int32 = 323328
+	DCP0005ActiveHeightTestNet3 int32 = math.MaxInt32
 
 	// DCP0005ActiveHeightMainNet is the height of activation for DCP0005
 	// in MainNet.
-	DCP0005ActiveHeightMainNet int32 = 431488
+	DCP0005ActiveHeightMainNet int32 = math.MaxInt32
 )
 
 // MerkleRoots recreates the merkle roots of regular and stake transactions from

@@ -229,6 +229,7 @@ var helpDescsEnUS = map[string]string{
 	"getblockheaderverboseresult-stakeroot":         "The merkle root of the stake transaction tree",
 	"getblockheaderverboseresult-extradata":         "Extra data field for the requested block",
 	"getblockheaderverboseresult-stakeversion":      "The stake version of the block",
+	"getblockheaderverboseresult-equihashsolution":  "The Equihash block solution (hash)",
 
 	// GetBlockCmd help.
 	"getblock--synopsis":   "Returns information about a block given its hash.",
@@ -268,6 +269,7 @@ var helpDescsEnUS = map[string]string{
 	"getblockverboseresult-finalstate":        "The block's finalstate",
 	"getblockverboseresult-extradata":         "Extra data field for the requested block",
 	"getblockverboseresult-stakeversion":      "Stake Version of the block",
+	"getblockverboseresult-equihashsolution":  "The block's equihash solution (hash)",
 
 	// TxRawResult help.
 	"txrawresult-hex":           "Hex-encoded transaction",

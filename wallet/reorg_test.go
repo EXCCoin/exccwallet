@@ -33,7 +33,7 @@ type gblock struct {
 }
 
 func maketg(t *testing.T, params *chaincfg.Params) *tg {
-	g, err := chaingen.MakeGenerator(params)
+	g, err := chaingen.MakeGenerator(params, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

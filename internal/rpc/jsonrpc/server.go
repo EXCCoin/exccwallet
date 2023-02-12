@@ -85,7 +85,7 @@ type handler struct {
 
 // jsonAuthFail sends a message back to the client if the http auth is rejected.
 func jsonAuthFail(w http.ResponseWriter) {
-	w.Header().Add("WWW-Authenticate", `Basic realm="dcrwallet RPC"`)
+	w.Header().Add("WWW-Authenticate", `Basic realm="exccwallet RPC", realm="jsonrpc"`)
 	http.Error(w, "401 Unauthorized.", http.StatusUnauthorized)
 }
 
@@ -176,7 +176,7 @@ func NewServer(opts *Options, activeNet *chaincfg.Params, walletLoader *loader.L
 // httpBasicAuth returns the UTF-8 bytes of the HTTP Basic authentication
 // string:
 //
-//   "Basic " + base64(username + ":" + password)
+//	"Basic " + base64(username + ":" + password)
 func httpBasicAuth(username, password string) []byte {
 	const header = "Basic "
 	base64 := base64.StdEncoding

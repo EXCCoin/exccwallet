@@ -235,14 +235,14 @@ func testImportPrivateKey(tc *testContext, ns walletdb.ReadWriteBucket) {
 	}{
 		{
 			name: "wif for compressed pubkey address",
-			in:   "PtWUqkS3apLoZUevFtG3Bwt6uyX8LQfYttycGkt2XCzgxquPATQgG",
+			in:   "cVQTk6uN8y7YaF9cL4eP1SnRTpek9KRFeSwAETAE5TsEfHAG53fj",
 			expected: expectedAddr{
-				address:     "TsSYVKf24LcrxyWHBqj4oBcU542PcjH1iA2",
-				addressHash: hexToBytes("10b601a41d2320527c95eb4cdae2c75b45ae45e1"),
+				address:     "TsXFUh2N9rCeZaZT6GFTaZqHXga2FgEfiQp",
+				addressHash: hexToBytes("44570968f7278fa82d7f324765276fff3fa53d7d"),
 				internal:    false,
 				imported:    true,
 				compressed:  true,
-				pubKey:      hexToBytes("03df8852b90ce8da7de6bcbacd26b78534ad9e46dc1b62a01dcf43f5837d7f9f5e"),
+				pubKey:      hexToBytes("02c95a1d301856d6d11648cf89690638104ebe5001dff89da695d3da3bf95883d9"),
 				privKey:     hexToBytes("ac4cb1a53c4f04a71fffbff26d4500c8a95443936deefd1b6ed89727a6858e08"),
 				// privKeyWIF is set to the in field during tests
 			},
@@ -260,7 +260,7 @@ func testImportPrivateKey(tc *testContext, ns walletdb.ReadWriteBucket) {
 	chainParams := tc.manager.ChainParams()
 	for i, test := range tests {
 		test.expected.privKeyWIF = test.in
-		wif, err := dcrutil.DecodeWIF(test.in, chainParams.PrivateKeyID)
+		wif, err := dcrutil.DecodeWIF(test.in)
 		if err != nil {
 			tc.t.Errorf("%s DecodeWIF #%d (%s) (%s): unexpected "+
 				"error: %v", prefix, i, test.in, test.name, err)
@@ -349,8 +349,8 @@ func testImportScript(tc *testContext, wb walletdb.ReadWriteBucket) {
 			in: hexToBytes("51210373c717acda38b5aa4c00c33932e059cdbc" +
 				"11deceb5f00490a9101704cc444c5151ae"),
 			expected: expectedAddr{
-				address:     "TcsXPUraiDWZoeQBEbw7T7LSgrvD7dar9DA",
-				addressHash: hexToBytes("db7e6d507e3e291a5ab2fac10107f4479c1f4f9c"),
+				address:     "TcsZNybmyxnmVDw8VSMwAfovUuGqbCqdRv4",
+				addressHash: hexToBytes("dbded67f4ff464eef45b8f1a916325eee4b272a0"),
 				internal:    false,
 				imported:    true,
 				compressed:  false,
@@ -480,9 +480,9 @@ func TestImportVotingAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer mgr.Close()
-	privTestNet, err := hdkeychain.NewKeyFromString("tprvZUo1ZuEfLLFWg9kt"+
-		"EaXHf3HKq2EdfwY5pXFZ2rbg6HFzeaoJDp1qFZnuuuN6iUAG9EyNF4sH4RmJ"+
-		"b395XWYpdqQoXRoKkV88HZwgq95KfiK", chaincfg.TestNet3Params())
+	privTestNet, err := hdkeychain.NewKeyFromString("tprvZUo1ZuEfLLFWfAYi"+
+		"MVaoDV1EeLmbSRuNzaSh7F4awft7dm8nHfFAFZyobWQyV8Qr26r8M2CmNw6n"+
+		"Eb35HaECWFGy1vzx2ZGdyfBeacrhh3a", chaincfg.TestNet3Params())
 	if err != nil {
 		t.Fatalf("unable to parse xpriv: %v", err)
 	}
@@ -613,9 +613,9 @@ func TestImportAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer mgr.Close()
-	privTestNet, err := hdkeychain.NewKeyFromString("tprvZUo1ZuEfLLFWg9kt"+
-		"EaXHf3HKq2EdfwY5pXFZ2rbg6HFzeaoJDp1qFZnuuuN6iUAG9EyNF4sH4RmJ"+
-		"b395XWYpdqQoXRoKkV88HZwgq95KfiK", chaincfg.TestNet3Params())
+	privTestNet, err := hdkeychain.NewKeyFromString("tprvZUo1ZuEfLLFWfAYi"+
+		"MVaoDV1EeLmbSRuNzaSh7F4awft7dm8nHfFAFZyobWQyV8Qr26r8M2CmNw6n"+
+		"Eb35HaECWFGy1vzx2ZGdyfBeacrhh3a", chaincfg.TestNet3Params())
 	if err != nil {
 		t.Fatalf("unable to parse xpriv: %v", err)
 	}

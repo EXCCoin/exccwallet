@@ -70,62 +70,62 @@ var (
 
 	expectedInternalAddrs = []expectedAddr{
 		{
-			address:     "SsrFKd8aX4KHabWSQfbmEaDv3BJCpSH2ySj",
-			addressHash: hexToBytes("f032b89ec075ab2847e2ec186ad000be16cf354b"),
+			address:     "SskxCsXL8vNm7vJGKngsYN88VMADfAaGbS5",
+			addressHash: hexToBytes("b61d627e15f0aa65e1fe00929c0c8232cfb30a33"),
 			branch:      1,
-			pubKey:      hexToBytes("03d1ad44eeac8eb59e9598f7e530a1cbe2c1684c0aa5f45ab24d33d38a2102dd1a"),
+			pubKey:      hexToBytes("02c20a0c03aead40e7c41be1f581ea200c180e7e24c1dae542b83b28390433b0de"),
 		},
 		{
-			address:     "SsW4roiFKWkbbhiAeEV5byet1pLKAP4xRks",
-			addressHash: hexToBytes("12d5a8e19b9a070d6d5e6e425b593c2c137285e3"),
+			address:     "Ssrg2hVh7SHdmWdUD8XgpVZ2YQAjBJStAB5",
+			addressHash: hexToBytes("f4defdfceb5f93a7d000ddc0754b6fd530d8a335"),
 			branch:      1,
-			pubKey:      hexToBytes("02cbcf5c1aa84bf8e6d04412d867eccbaa6cc12ebb792f3f1eaf4d2887f8e884f3"),
+			pubKey:      hexToBytes("0257b3ec063ce28f9c9bfd8a0f81c7b34dc73a88aa65372477767f80f6e24d7f77"),
 		},
 		{
-			address:     "SscaK4A6V94dawc6ZBRCGUxPjdf7um1GJgD",
-			addressHash: hexToBytes("5a38638f09937214b07481c656d0c9c73020f8bf"),
+			address:     "SsqTAmS3esBArwufXxWoxcDj2KwCWzN2Lut",
+			addressHash: hexToBytes("e778318e96948b283c5f41222d2d9508dfca4814"),
 			branch:      1,
-			pubKey:      hexToBytes("0392735a0eee9026425556ef5c5ae23ad3e54598132a1ca0d74dbcac7bfe31bfa4"),
+			pubKey:      hexToBytes("032b38dfebaac31fcdc05103c9a95a5bdd0a13f92a183265a45131a4039f04fe6e"),
 		},
 		{
-			address:     "Ssm4BeTKgwKGTqNR63WiGtP1FJaKCRJsN1S",
-			addressHash: hexToBytes("b73edb8f32957800e2e3b9424c3b659acac51b7f"),
+			address:     "SsZxFzYhWs5WomAmZYjG9D84zRNUNoXyNzF",
+			addressHash: hexToBytes("3d769b41f22ce5cc9fdf8825a76153e8ccd826d0"),
 			branch:      1,
-			pubKey:      hexToBytes("037c1e500884c6c3cb044390b52525d324fd67c031fdd9a47d742d0323fe5de73f"),
+			pubKey:      hexToBytes("0322f71037a9f14734814508e373748f771dae08eabd8edb965bf6cba2891605c0"),
 		},
 		{
-			address:     "SssBoVxTkCUb6xs7vph3BHdPmki3weVvRsF",
-			addressHash: hexToBytes("fa8073fcb670ba7312a1ef0d908cfb05c59b70b9"),
+			address:     "SsseJmqAvGeU23vgZHtnXhs61VmQCCfDDJ1",
+			addressHash: hexToBytes("ff83b45c2a042bd3834030b25c5c5935a0c9b571"),
 			branch:      1,
-			pubKey:      hexToBytes("0327540e546f9cfac45f51699e2656732727507971060641ead554d78eeea88aa6"),
+			pubKey:      hexToBytes("02c46344dda4a84d0a657f5a4d3fb8138b3705e739c86ccf8519f53ef9e885cc51"),
 		},
 	}
 
 	expectedExternalAddrs = []expectedAddr{
 		{
-			address:     "SsfPTmZmaXGkXfcNGjftRPmoGGCqtNPCHKx",
-			addressHash: hexToBytes("791376f67fb3becf392b071d25d7c99c82139ee3"),
-			pubKey:      hexToBytes("031634efb3e83c834a82cdc898000f85215a09dc742d5b3b82ace7221ca1bb0938"),
+			address:     "SsnezvUt3Lx5FoVRnAsW2Jv8mkdYH9PqTnR",
+			addressHash: hexToBytes("c8cc97263cd035bfea3f9a7dc8e6d1d2d3096095"),
+			pubKey:      hexToBytes("027a5fd32d39739ef49d003a38d3a4122411e0f977df2b285ea2465af1d692ae32"),
 		},
 		{
-			address:     "SsXhSHBiaEan7Ls36bvhLspZ3LC1NKzuwQz",
-			addressHash: hexToBytes("24b8b3d89f987bf3cd80a8c16d9368d683217fa4"),
-			pubKey:      hexToBytes("0280beb72c6ef42ce3133fd6d340fd5bedcfccaded5a6eabb6d2430e3958bf7c85"),
+			address:     "SsrWXcfYNFs8X84roWwzVb6NSRJpJi6CDHr",
+			addressHash: hexToBytes("f312f89283bd5bdb98b574cf129c2fe31e92f11c"),
+			pubKey:      hexToBytes("02822dc0f2fd4fab28a18018dd0f738252c1b9a2806f9e37d64644f9a39895b803"),
 		},
 		{
-			address:     "SspSfaWDNwc9TA31Q9iR2jot2eV1hk2ix6U",
-			addressHash: hexToBytes("dc67b3d95adb1789efe4aa73607d8a8c57eee2bb"),
-			pubKey:      hexToBytes("03b120e0e073a12a1957680251a1562c5c6e30e547797fb5411107eac19699f601"),
+			address:     "SsfLoxgzpgqEWwSUX5rTEShjEHb5686VD6n",
+			addressHash: hexToBytes("78931273ff6520e9ef068f92c2c929a6192006db"),
+			pubKey:      hexToBytes("027cfde63a36ef6e2bf134155ad2e8368704e6a6f58645101ab4a9286e2306a19c"),
 		},
 		{
-			address:     "SsrSYTB9MQQ1czAfPmWE66ZFqv7NrwzqfQT",
-			addressHash: hexToBytes("f252015c8e0059c21cae623704d8588d12ca5c74"),
-			pubKey:      hexToBytes("0350822c9bd61f524f4d68fa605e850c34c5e8ccc9b5cf278782131c1e21dd261b"),
+			address:     "Ssf2wpUEbZ7VzH8vfJsxxRqX4ptnHFkunw8",
+			addressHash: hexToBytes("753224ffc959e79062b6c9863b622cb97c4121ce"),
+			pubKey:      hexToBytes("02a872aba38c083db55417c1d467630cdaf7be7c69845b96d317bea98c6908b376"),
 		},
 		{
-			address:     "SsqBcGBre8SZrG61cd5M5e2GaMJbK2CMdEa",
-			addressHash: hexToBytes("e486d22d1244becac5a30b38dda1c8c4c1b3bdeb"),
-			pubKey:      hexToBytes("031c494068c9c454bef7de35fa4717f21c07dec4471bd8500650b133d57e49a81d"),
+			address:     "SsWxt2qbdLMyhwG8GrcYq6m1rP2ARqWusLV",
+			addressHash: hexToBytes("1cac503a378f06d8e4a699c857a0015457950b1b"),
+			pubKey:      hexToBytes("03601fee537616d0b7dd56d52ae98764c0c90bfdb293e468d3ded650630b310823"),
 		},
 	}
 )

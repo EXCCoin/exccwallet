@@ -20,7 +20,6 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v4"
 	gcs2 "github.com/decred/dcrd/gcs/v3"
-	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
@@ -904,9 +903,6 @@ func (w *Wallet) VoteOnOwnedTickets(ctx context.Context, winningTicketHashes []*
 				}
 			}
 
-			// Deal with treasury votes
-			tspends := w.GetAllTSpends(ctx)
-
 			// Dealwith consensus votes
 			vote, err := createUnsignedVote(ticketHash, ticketPurchase,
 				blockHeight, blockHash, ticketVoteBits, w.subsidyCache,
@@ -915,48 +911,6 @@ func (w *Wallet) VoteOnOwnedTickets(ctx context.Context, winningTicketHashes []*
 				log.Errorf("Failed to create vote transaction for ticket "+
 					"hash %v: %v", ticketHash, err)
 				continue
-			}
-
-			// Iterate over all tpends and determine if they are
-			// within the voting window.
-			tVotes := make([]byte, 0, 256)
-			tVotes = append(tVotes[:], 'T', 'V')
-			for _, v := range tspends {
-				if !blockchain.InsideTSpendWindow(int64(blockHeight),
-					v.Expiry, w.chainParams.TreasuryVoteInterval,
-					w.chainParams.TreasuryVoteIntervalMultiplier) {
-					continue
-				}
-
-				// Get policy for tspend, falling back to any
-				// policy for the Pi key.
-				tspendHash := v.TxHash()
-				tspendVote := w.TSpendPolicy(&tspendHash, ticketHash)
-				if tspendVote == stake.TreasuryVoteInvalid {
-					continue
-				}
-
-				// Append tspend hash and vote bits
-				tVotes = append(tVotes[:], tspendHash[:]...)
-				tVotes = append(tVotes[:], byte(tspendVote))
-			}
-			if len(tVotes) > 2 {
-				// Vote was appended. Create output and flip
-				// script version.
-				var b txscript.ScriptBuilder
-				b.AddOp(txscript.OP_RETURN)
-				b.AddData(tVotes)
-				tspendVoteScript, err := b.Script()
-				if err != nil {
-					// Log error and continue.
-					log.Errorf("Failed to create treasury "+
-						"vote for ticket hash %v: %v",
-						ticketHash, err)
-				} else {
-					// Success.
-					vote.AddTxOut(wire.NewTxOut(0, tspendVoteScript))
-					vote.Version = 3
-				}
 			}
 
 			// Sign vote and sumit.

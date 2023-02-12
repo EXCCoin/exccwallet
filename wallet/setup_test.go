@@ -11,6 +11,7 @@ import (
 
 	_ "decred.org/dcrwallet/v2/wallet/drivers/bdb"
 	"decred.org/dcrwallet/v2/wallet/walletdb"
+	"decred.org/dcrwallet/v2/walletseed"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrutil/v4"
 )
@@ -37,7 +38,13 @@ func testWallet(t *testing.T, cfg *Config) (w *Wallet, teardown func()) {
 		db.Close()
 		os.Remove(f.Name())
 	}
-	err = Create(ctx, opaqueDB{db}, []byte(InsecurePubPassphrase), []byte("private"), nil, cfg.Params)
+	mnemonic := "piano just arch aim summer bar space hip horse captain sudden glad" +
+		" review mushroom salt gather lemon limit humble raccoon copper core vacuum very"
+	seed, err := walletseed.DecodeUserInput(mnemonic, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = Create(ctx, opaqueDB{db}, []byte(InsecurePubPassphrase), []byte("private"), seed, cfg.Params)
 	if err != nil {
 		rm()
 		t.Fatal(err)

@@ -532,8 +532,9 @@ func blockMetaFromHeader(blockHash *chainhash.Hash, header []byte) BlockMeta {
 	}
 }
 
-// RawBlockHeader is a 180 byte block header (always true for version 0 blocks).
-type RawBlockHeader [180]byte
+// RawBlockHeader is block header of max possible len
+// (always true for version 0 blocks).
+type RawBlockHeader [wire.MaxBlockHeaderPayload]byte
 
 // Height extracts the height encoded in a block header.
 func (h *RawBlockHeader) Height() int32 {
@@ -1362,8 +1363,6 @@ func getStakeOpCode(version uint16, pkScript []byte) uint8 {
 		return txscript.OP_SSRTX
 	case stdscript.STStakeChangePubKeyHash, stdscript.STStakeChangeScriptHash:
 		return txscript.OP_SSTXCHANGE
-	case stdscript.STTreasuryGenPubKeyHash, stdscript.STTreasuryGenScriptHash:
-		return txscript.OP_TGEN
 	}
 
 	return opNonstake
@@ -2963,8 +2962,7 @@ func (s *Store) UnspentOutputsForAmount(ns, addrmgrNs walletdb.ReadBucket, neede
 			}
 		}
 		switch opcode {
-		case txscript.OP_SSGEN, txscript.OP_SSRTX,
-			txscript.OP_TADD, txscript.OP_TGEN:
+		case txscript.OP_SSGEN, txscript.OP_SSRTX:
 			if !coinbaseMatured(s.chainParams, txHeight, syncHeight) {
 				continue
 			}
@@ -3044,8 +3042,7 @@ func (s *Store) UnspentOutputsForAmount(ns, addrmgrNs walletdb.ReadBucket, neede
 
 			// Skip outputs that are not mature.
 			switch opcode {
-			case txscript.OP_SSGEN, txscript.OP_SSRTX, txscript.OP_SSTXCHANGE,
-				txscript.OP_TADD, txscript.OP_TGEN:
+			case txscript.OP_SSGEN, txscript.OP_SSRTX, txscript.OP_SSTXCHANGE:
 				continue
 			}
 
@@ -3242,8 +3239,7 @@ func (s *Store) MakeInputSource(ns, addrmgrNs walletdb.ReadBucket, account uint3
 				}
 			}
 			switch opcode {
-			case txscript.OP_SSGEN, txscript.OP_SSRTX, txscript.OP_TADD,
-				txscript.OP_TGEN:
+			case txscript.OP_SSGEN, txscript.OP_SSRTX:
 				if !coinbaseMatured(s.chainParams, txHeight, syncHeight) {
 					continue
 				}
@@ -3362,8 +3358,7 @@ func (s *Store) MakeInputSource(ns, addrmgrNs walletdb.ReadBucket, account uint3
 
 			// Skip outputs that are not mature.
 			switch opcode {
-			case txscript.OP_SSGEN, txscript.OP_SSTXCHANGE, txscript.OP_SSRTX,
-				txscript.OP_TADD, txscript.OP_TGEN:
+			case txscript.OP_SSGEN, txscript.OP_SSTXCHANGE, txscript.OP_SSRTX:
 				continue
 			}
 
@@ -3482,9 +3477,6 @@ func (s *Store) balanceFullScan(dbtx walletdb.ReadTx, minConf int32, syncHeight 
 		}
 
 		switch opcode {
-		case txscript.OP_TGEN:
-			// Or add another type of balance?
-			fallthrough
 		case opNonstake:
 			isConfirmed := confirmed(minConf, height, syncHeight)
 			creditFromCoinbase := fetchRawCreditIsCoinbase(cVal)
@@ -3580,9 +3572,6 @@ func (s *Store) balanceFullScan(dbtx walletdb.ReadTx, minConf int32, syncHeight 
 		case txscript.OP_SSTXCHANGE:
 			ab.Total += utxoAmt
 			continue
-		case txscript.OP_TGEN:
-			// Only consider mined tspends for simpler balance
-			// accounting.
 		default:
 			log.Warnf("Unhandled unconfirmed opcode %v: %v", opcode, v)
 		}

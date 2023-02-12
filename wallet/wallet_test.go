@@ -101,8 +101,7 @@ func TestVotingXprivFromSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to create seed: %v", err)
 	}
-	wantXpriv := "dprv3oaf1h1hLxLZNHn6Gn9AaUaMJxhpHAj2KGMMHTi2AnoiHdRhCc" +
-		"iKbwf3dB6zpPEq8ffdT4NZ7gjtrZBQhSWDm2RVXbphmpdPnbq299ddB8a"
+	wantXpriv := "xprv9xgs8f1C9ZQcxMbbAqQFLMZdVzY5SuSTibUeKYGB4AjSJ6ZrDn7mgHAnveMU8gsKmCCJzhbZsizw9unBYV9VTDzXvvVENQwDjN7V2JSYR5K"
 
 	tests := []struct {
 		name, want string

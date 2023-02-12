@@ -46,7 +46,7 @@ var (
 	addr     dcrutil.Address
 )
 
-var chainParams = &chaincfg.TestNet2Params
+var chainParams = &chaincfg.TestNetParams
 
 var (
 	epoch     time.Time
@@ -76,7 +76,7 @@ func setup() error {
 		return err
 	}
 	defer db.Close()
-	seed, err := walletseed.GenerateRandomSeed(hdkeychain.RecommendedSeedLen)
+	seed, err := walletseed.GenerateRandomEntropy(walletseed.RecommendedEntLen)
 	if err != nil {
 		return err
 	}
@@ -99,7 +99,7 @@ func setup() error {
 			return err
 		}
 
-		privKey, _ := secp256k1.PrivKeyFromBytes(secp256k1.S256(), privKey)
+		privKey, _ := secp256k1.PrivKeyFromBytes(privKey)
 		wif, err := dcrutil.NewWIF(privKey, chainParams, chainec.ECTypeSecp256k1)
 		if err != nil {
 			return err
@@ -294,7 +294,6 @@ func createUnsignedTicketPurchase(prevOut *wire.OutPoint,
 	}
 	tx.AddTxOut(wire.NewTxOut(0, pkScript))
 
-	_, err = stake.IsSStx(tx)
 	return tx, err
 }
 
@@ -412,7 +411,8 @@ func createUnsignedRevocation(ticketHash *chainhash.Hash, ticketPurchase *wire.M
 	// Revocations must pay a fee but do so by decreasing one of the output
 	// values instead of increasing the input value and using a change output.
 	// Calculate the estimated signed serialize size.
-	sizeEstimate := txsizes.EstimateSerializeSize(1, revocation.TxOut, false)
+	scriptSizers := []txsizes.ScriptSizer{txsizes.P2SHScriptSize}
+	sizeEstimate := txsizes.EstimateSerializeSize(scriptSizers, revocation.TxOut, false)
 	feeEstimate := txrules.FeeForSerializeSize(feePerKB, sizeEstimate)
 
 	// Reduce the output value of one of the outputs to accommodate for the relay

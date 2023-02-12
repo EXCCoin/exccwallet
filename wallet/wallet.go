@@ -246,25 +246,6 @@ func (w *Wallet) AddTSpend(tx wire.MsgTx) error {
 	return nil
 }
 
-// GetAllTSpends returns all tspends currently in the cache.
-// Note: currently the tspend list does not get culled.
-func (w *Wallet) GetAllTSpends(ctx context.Context) []*wire.MsgTx {
-	_, height := w.MainChainTip(ctx)
-	w.stakeSettingsLock.Lock()
-	defer w.stakeSettingsLock.Unlock()
-
-	txs := make([]*wire.MsgTx, 0, len(w.tspends))
-	for k := range w.tspends {
-		v := w.tspends[k]
-		if uint32(height) > v.Expiry {
-			delete(w.tspends, k)
-			continue
-		}
-		txs = append(txs, &v)
-	}
-	return txs
-}
-
 func voteVersion(params *chaincfg.Params) uint32 {
 	switch params.Net {
 	case wire.MainNet:
@@ -2051,7 +2032,7 @@ func (w *Wallet) SignHashes(ctx context.Context, hashes [][]byte, addr stdaddr.A
 func (w *Wallet) SignMessage(ctx context.Context, msg string, addr stdaddr.Address) (sig []byte, err error) {
 	const op errors.Op = "wallet.SignMessage"
 	var buf bytes.Buffer
-	wire.WriteVarString(&buf, 0, "Decred Signed Message:\n")
+	wire.WriteVarString(&buf, 0, "ExchangeCoin Signed Message:\n")
 	wire.WriteVarString(&buf, 0, msg)
 	messageHash := chainhash.HashB(buf.Bytes())
 	var privKey *secp256k1.PrivateKey
@@ -2081,7 +2062,7 @@ func VerifyMessage(msg string, addr stdaddr.Address, sig []byte, params stdaddr.
 	// Validate the signature - this just shows that it was valid for any pubkey
 	// at all. Whether the pubkey matches is checked below.
 	var buf bytes.Buffer
-	wire.WriteVarString(&buf, 0, "Decred Signed Message:\n")
+	wire.WriteVarString(&buf, 0, "ExchangeCoin Signed Message:\n")
 	wire.WriteVarString(&buf, 0, msg)
 	expectedMessageHash := chainhash.HashB(buf.Bytes())
 	pk, wasCompressed, err := ecdsa.RecoverCompact(sig, expectedMessageHash)
@@ -3879,14 +3860,11 @@ func votingXprivFromSeed(seed []byte, params *chaincfg.Params) (*hdkeychain.Exte
 
 	// Generate the BIP0044 HD key structure to ensure the provided seed
 	// can generate the required structure with no issues.
-	coinTypeLegacyKeyPriv, coinTypeSLIP0044KeyPriv, acctKeyLegacyPriv, acctKeySLIP0044Priv, err := udb.HDKeysFromSeed(seed, params)
+	coinTypeSLIP0044KeyPriv, acctKeySLIP0044Priv, err := udb.HDKeysFromSeed(seed, params)
 	if err != nil {
 		return nil, err
 	}
-	coinTypeLegacyKeyPriv.Zero()
 	coinTypeSLIP0044KeyPriv.Zero()
-	acctKeyLegacyPriv.Zero()
-
 	return acctKeySLIP0044Priv, nil
 }
 
@@ -4042,7 +4020,7 @@ func isRevocation(tx *wire.MsgTx) bool {
 }
 
 func isTreasurySpend(tx *wire.MsgTx) bool {
-	return stake.IsTSpend(tx)
+	return false
 }
 
 // hasVotingAuthority returns whether the 0th output of a ticket purchase can be
@@ -5272,14 +5250,7 @@ func Create(ctx context.Context, db DB, pubPass, privPass, seed []byte, params *
 	// we generate a random seed for the wallet with the recommended seed
 	// length.
 	if seed == nil {
-		hdSeed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
-		if err != nil {
-			return errors.E(op, err)
-		}
-		seed = hdSeed
-	}
-	if len(seed) < hdkeychain.MinSeedBytes || len(seed) > hdkeychain.MaxSeedBytes {
-		return errors.E(op, hdkeychain.ErrInvalidSeedLen)
+		return errors.E(op, "seed is required argument")
 	}
 
 	err := udb.Initialize(ctx, db.internal(), params, seed, pubPass, privPass)
@@ -5301,7 +5272,9 @@ func CreateWatchOnly(ctx context.Context, db DB, extendedPubKey string, pubPass 
 
 // decodeStakePoolColdExtKey decodes the string of stake pool addresses
 // to search incoming tickets for. The format for the passed string is:
-//   "xpub...:end"
+//
+//	"xpub...:end"
+//
 // where xpub... is the extended public key and end is the last
 // address index to scan to, exclusive. Effectively, it returns the derived
 // addresses for this public key for the address indexes [0,end). The branch

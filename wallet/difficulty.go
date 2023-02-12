@@ -70,6 +70,12 @@ func (w *Wallet) findPrevTestNetDifficulty(dbtx walletdb.ReadTx, h *wire.BlockHe
 // nextRequiredPoWDifficulty calculates the required proof-of-work difficulty
 // for the block that references header as a parent.
 func (w *Wallet) nextRequiredPoWDifficulty(dbtx walletdb.ReadTx, header *wire.BlockHeader, chain []*BlockNode, newBlockTime time.Time) (uint32, error) {
+	nextHeight := int64(header.Height) + 1
+	spec := w.chainParams.Algorithm(uint32(nextHeight))
+	if uint32(nextHeight) == spec.Height {
+		return spec.Bits, nil
+	}
+
 	// Get the old difficulty; if we aren't at a block height where it changes,
 	// just return this.
 	oldDiff := header.Bits
@@ -77,7 +83,6 @@ func (w *Wallet) nextRequiredPoWDifficulty(dbtx walletdb.ReadTx, header *wire.Bl
 
 	// We're not at a retarget point, return the oldDiff.
 	params := w.chainParams
-	nextHeight := int64(header.Height) + 1
 	if nextHeight%params.WorkDiffWindowSize != 0 {
 		// For networks that support it, allow special reduction of the
 		// required difficulty once too much time has elapsed without
@@ -138,7 +143,7 @@ func (w *Wallet) nextRequiredPoWDifficulty(dbtx walletdb.ReadTx, header *wire.Bl
 
 			// Just assume we're at the target (no change) if we've
 			// gone all the way back to the genesis block.
-			if oldHeader.Height == 0 {
+			if oldHeader.Height == 0 || oldHeader.Height == spec.Height {
 				timeDifference = int64(params.TargetTimespan /
 					time.Second)
 			}
@@ -175,7 +180,7 @@ func (w *Wallet) nextRequiredPoWDifficulty(dbtx walletdb.ReadTx, header *wire.Bl
 		// Query the header from the provided chain instead of database if
 		// present.  The parent of chain[0] is guaranteed to be in stored in the
 		// database.
-		if oldHeader.Height != 0 {
+		if oldHeader.Height != 0 && oldHeader.Height != spec.Height {
 			if len(chain) > 0 && int32(oldHeader.Height)-int32(chain[0].Header.Height) > 0 {
 				oldHeader = chain[oldHeader.Height-chain[0].Header.Height-1].Header
 			} else {
@@ -562,7 +567,7 @@ func (w *Wallet) validateHeaderChainDifficulties(dbtx walletdb.ReadTx, chain []*
 				hash, h.Bits, bits)
 			return chain[idx:], errors.E(op, errors.Consensus, err)
 		}
-		err = blockchain.CheckProofOfWork(hash, h.Bits, w.chainParams.PowLimit)
+		err = blockchain.CheckProofOfWork(h, h.Bits, w.chainParams)
 		if err != nil {
 			return chain[idx:], errors.E(op, errors.Consensus, err)
 		}

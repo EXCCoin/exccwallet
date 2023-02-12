@@ -29,7 +29,7 @@ var (
 	privPass = []byte("private")
 )
 
-var chainParams = &chaincfg.TestNet2Params
+var chainParams = &chaincfg.TestNetParams
 
 func main() {
 	err := setup()
@@ -50,11 +50,11 @@ func setup() error {
 		return err
 	}
 	defer db.Close()
-	seed, err := walletseed.GenerateRandomSeed(hdkeychain.RecommendedSeedLen)
+	seed, err := walletseed.GenerateRandomEntropy(walletseed.RecommendedEntLen)
 	if err != nil {
 		return err
 	}
-	err = udb.Initialize(db, chainParams, seed, pubPass, privPass, false)
+	err = udb.Initialize(db, chainParams, seed, pubPass, privPass)
 	if err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func setup() error {
 					// of [0,syncToIndex].  This has been fixed in the updated
 					// code after the DB upgrade has been performed, but that
 					// code can't be called here.
-					_, err = amgr.SyncAccountToAddrIndex(ns, account, a.numAddrs, branch)
+					err = amgr.SyncAccountToAddrIndex(ns, account, a.numAddrs, branch)
 					if err != nil {
 						return err
 					}

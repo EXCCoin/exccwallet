@@ -7413,7 +7413,8 @@ type DecodeSeedRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	UserInput string `protobuf:"bytes,1,opt,name=user_input,json=userInput,proto3" json:"user_input,omitempty"`
+	UserInput  string `protobuf:"bytes,1,opt,name=user_input,json=userInput,proto3" json:"user_input,omitempty"`
+	Passphrase string `protobuf:"bytes,2,opt,name=passphrase" json:"passphrase,omitempty"`
 }
 
 func (x *DecodeSeedRequest) Reset() {
@@ -7451,6 +7452,13 @@ func (*DecodeSeedRequest) Descriptor() ([]byte, []int) {
 func (x *DecodeSeedRequest) GetUserInput() string {
 	if x != nil {
 		return x.UserInput
+	}
+	return ""
+}
+
+func (m *DecodeSeedRequest) GetPassphrase() string {
+	if m != nil {
+		return m.Passphrase
 	}
 	return ""
 }

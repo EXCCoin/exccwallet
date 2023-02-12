@@ -19,8 +19,8 @@ import (
 	"github.com/decred/dcrd/chaincfg"
 	"github.com/decred/dcrd/chaincfg/chainec"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/dcrec/secp256k1"
 	"github.com/decred/dcrd/dcrutil"
+	"github.com/decred/dcrd/exccec/secp256k1"
 	"github.com/decred/dcrd/hdkeychain"
 	"github.com/decred/dcrd/txscript"
 	"github.com/decred/dcrd/wire"
@@ -30,7 +30,7 @@ import (
 	"github.com/decred/dcrwallet/walletseed"
 )
 
-const dbname = "v7.db"
+const dbname = "v6.db"
 
 var (
 	epoch    time.Time
@@ -53,14 +53,14 @@ func main() {
 }
 
 func setup() error {
-	var chainParams = &chaincfg.TestNet2Params
+	var chainParams = &chaincfg.TestNetParams
 	os.Remove(dbname)
 	db, err := walletdb.Create("bdb", dbname)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	seed, err := walletseed.GenerateRandomSeed(hdkeychain.RecommendedSeedLen)
+	seed, err := walletseed.GenerateRandomEntropy(walletseed.RecommendedEntLen)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func setup() error {
 
 		// Add 3 unmined credits with expiries set
 		for count := 1; count < 4; count++ {
-			faucetAddr, err := dcrutil.DecodeAddress("TsWjioPrP8E1TuTMmTrVMM2BA4iPrjQXBpR")
+			faucetAddr, err := dcrutil.DecodeAddress("TsWZ1EzypJfMwBKAEDYKuyHRGctqGCNrAue")
 			if err != nil {
 				return errors.Errorf("failed to decode address: %s", err)
 			}
