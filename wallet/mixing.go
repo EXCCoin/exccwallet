@@ -11,8 +11,8 @@ import (
 	"net"
 	"time"
 
-	"decred.org/cspp/v2"
-	"decred.org/cspp/v2/coinjoin"
+	"github.com/EXCCoin/cspp/v2"
+	"github.com/EXCCoin/cspp/v2/coinjoin"
 	"github.com/EXCCoin/exccwallet/v2/errors"
 	"github.com/EXCCoin/exccwallet/v2/wallet/txauthor"
 	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"

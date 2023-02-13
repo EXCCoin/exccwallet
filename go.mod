@@ -3,7 +3,7 @@ module github.com/EXCCoin/exccwallet/v2
 go 1.19
 
 require (
-	decred.org/cspp/v2 v2.0.0
+	github.com/EXCCoin/cspp/v2 v2.0.0-20230213105029-4f29ad5db4e8
 	github.com/EXCCoin/exccd/addrmgr/v2 v2.0.0-20230212114142-46d4795f2f82
 	github.com/EXCCoin/exccd/blockchain/stake/v4 v4.0.0-20230212114142-46d4795f2f82
 	github.com/EXCCoin/exccd/blockchain/standalone/v2 v2.0.0-20230212114142-46d4795f2f82
@@ -48,9 +48,6 @@ require (
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
 	github.com/companyzero/sntrup4591761 v0.0.0-20220309191932-9e0f3af2f07a // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
-	github.com/decred/dcrd/chaincfg/chainhash v1.0.3 // indirect
-	github.com/decred/dcrd/crypto/blake256 v1.0.0 // indirect
-	github.com/decred/dcrd/wire v1.5.0 // indirect
 	github.com/mattn/go-pointer v0.0.1 // indirect
 	golang.org/x/net v0.6.0 // indirect
 	golang.org/x/sys v0.5.0 // indirect
