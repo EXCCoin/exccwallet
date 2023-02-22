@@ -4923,7 +4923,7 @@ func (s *Server) version(ctx context.Context, icmd interface{}) (interface{}, er
 		}
 	}
 
-	resp["dcrwalletjsonrpcapi"] = dcrdtypes.VersionResult{
+	resp["exccwalletjsonrpcapi"] = dcrdtypes.VersionResult{
 		VersionString: jsonrpcSemverString,
 		Major:         jsonrpcSemverMajor,
 		Minor:         jsonrpcSemverMinor,
