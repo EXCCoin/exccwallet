@@ -159,7 +159,6 @@ var handlers = map[string]handler{
 	"sendtomultisig":            {fn: (*Server).sendToMultiSig},
 	"setaccountpassphrase":      {fn: (*Server).setAccountPassphrase},
 	"setdisapprovepercent":      {fn: (*Server).setDisapprovePercent},
-	"settreasurypolicy":         {fn: (*Server).setTreasuryPolicy},
 	"settxfee":                  {fn: (*Server).setTxFee},
 	"setvotechoice":             {fn: (*Server).setVoteChoice},
 	"signmessage":               {fn: (*Server).signMessage},
@@ -208,7 +207,7 @@ func unimplemented(*Server, context.Context, interface{}) (interface{}, error) {
 func unsupported(*Server, context.Context, interface{}) (interface{}, error) {
 	return nil, &dcrjson.RPCError{
 		Code:    -1,
-		Message: "Request unsupported by dcrwallet",
+		Message: "Request unsupported by exccwallet",
 	}
 }
 
@@ -232,7 +231,7 @@ func lazyApplyHandler(s *Server, ctx context.Context, request *dcrjson.Request) 
 			}
 			rpc, ok := n.(*dcrd.RPC)
 			if !ok {
-				return nil, rpcErrorf(dcrjson.ErrRPCClientNotConnected, "RPC passthrough requires dcrd RPC synchronization")
+				return nil, rpcErrorf(dcrjson.ErrRPCClientNotConnected, "RPC passthrough requires exccd RPC synchronization")
 			}
 			var resp json.RawMessage
 			var params = make([]interface{}, len(request.Params))
@@ -4494,7 +4493,7 @@ func (s *Server) signRawTransaction(ctx context.Context, icmd interface{}) (inte
 				var res *dcrdtypes.GetTxOutResult
 				err := rpc.Call(gctx, "gettxout", &res, hash, index, tree, true)
 				if err != nil {
-					return errors.E(errors.Op("dcrd.jsonrpc.gettxout"), err)
+					return errors.E(errors.Op("exccd.jsonrpc.gettxout"), err)
 				}
 				requestedMu.Lock()
 				requested[txIn.PreviousOutPoint] = res

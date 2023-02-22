@@ -47,7 +47,7 @@ func TestUpgrades(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	d, err := os.MkdirTemp("", "dcrwallet_udb_TestUpgrades")
+	d, err := os.MkdirTemp("", "exccwallet_udb_TestUpgrades")
 	if err != nil {
 		t.Fatal(err)
 	}

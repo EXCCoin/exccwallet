@@ -421,7 +421,7 @@ out:
 			case "stop":
 				log.Debugf("RPC method stop invoked by %s", remoteAddr(ctx))
 				resp := makeResponse(req.ID,
-					"dcrwallet stopping.", nil)
+					"exccwallet stopping.", nil)
 				mresp, err := json.Marshal(resp)
 				// Expected to never fail.
 				if err != nil {
@@ -578,7 +578,7 @@ func (s *Server) postClientRPC(w http.ResponseWriter, r *http.Request) {
 	case "stop":
 		log.Debugf("RPC method stop invoked by %s", r.RemoteAddr)
 		stop = true
-		res = "dcrwallet stopping"
+		res = "exccwallet stopping"
 	default:
 		res, jsonErr = s.handlerClosure(ctx, &req)()
 	}

@@ -15,8 +15,8 @@ func init() {
 // Path returns the absolute filepath of a file in the dcrwallet main module,
 // relative to the assets package.
 //
-// For example, to access the filepath of a sample-dcrwallet.conf file from the
-// root of the main module, call Path("../sample-dcrwallet.conf").
+// For example, to access the filepath of a sample-exccwallet.conf file from the
+// root of the main module, call Path("../sample-exccwallet.conf").
 //
 // This function is only usable when built without -trimpath and on the host the
 // Go program was compiled on.

@@ -25,7 +25,7 @@ var basicWalletConfig = Config{
 
 func testWallet(t *testing.T, cfg *Config) (w *Wallet, teardown func()) {
 	ctx := context.Background()
-	f, err := os.CreateTemp("", "dcrwallet.testdb")
+	f, err := os.CreateTemp("", "exccwallet.testdb")
 	if err != nil {
 		t.Fatal(err)
 	}

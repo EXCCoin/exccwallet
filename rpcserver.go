@@ -147,9 +147,9 @@ func generateAuthority(pub, priv interface{}) (*ClientCA, error) {
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			CommonName:         "dcrwallet",
-			Organization:       []string{"dcrwallet"},
-			OrganizationalUnit: []string{"dcrwallet certificate authority"},
+			CommonName:         "exccwallet",
+			Organization:       []string{"exccwallet"},
+			OrganizationalUnit: []string{"exccwallet certificate authority"},
 		},
 		NotBefore:             now.Add(-time.Hour * 24),
 		NotAfter:              validUntil,
@@ -204,9 +204,9 @@ func createSignedClientCert(pub, caPriv interface{}, ca *x509.Certificate) ([]by
 		NotBefore:    time.Now().Add(-time.Hour * 24),
 		NotAfter:     ca.NotAfter,
 		Subject: pkix.Name{
-			CommonName:         "dcrwallet",
-			Organization:       []string{"dcrwallet"},
-			OrganizationalUnit: []string{"dcrwallet client certificate"},
+			CommonName:         "exccwallet",
+			Organization:       []string{"exccwallet"},
+			OrganizationalUnit: []string{"exccwallet client certificate"},
 		},
 	}
 	cert, err := x509.CreateCertificate(rand.Reader, template, ca, pub, caPriv)

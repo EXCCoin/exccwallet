@@ -112,12 +112,12 @@ type config struct {
 	DisableCoinTypeUpgrades bool                `long:"disablecointypeupgrades" description:"Never upgrade from legacy to SLIP0044 coin type keys"`
 
 	// RPC client options
-	RPCConnect       string                  `short:"c" long:"rpcconnect" description:"Network address of dcrd RPC server"`
-	CAFile           *cfgutil.ExplicitString `long:"cafile" description:"dcrd RPC Certificate Authority"`
+	RPCConnect       string                  `short:"c" long:"rpcconnect" description:"Network address of exccd RPC server"`
+	CAFile           *cfgutil.ExplicitString `long:"cafile" description:"exccd RPC Certificate Authority"`
 	ClientCAFile     *cfgutil.ExplicitString `long:"clientcafile" description:"Certficate Authority to verify TLS client certificates"`
-	DisableClientTLS bool                    `long:"noclienttls" description:"Disable TLS for dcrd RPC; only allowed when connecting to localhost"`
-	DcrdUsername     string                  `long:"dcrdusername" description:"dcrd RPC username; overrides --username"`
-	DcrdPassword     string                  `long:"dcrdpassword" default-mask:"-" description:"dcrd RPC password; overrides --password"`
+	DisableClientTLS bool                    `long:"noclienttls" description:"Disable TLS for exccd RPC; only allowed when connecting to localhost"`
+	DcrdUsername     string                  `long:"exccdusername" description:"exccd RPC username; overrides --username"`
+	DcrdPassword     string                  `long:"exccdpassword" default-mask:"-" description:"exccd RPC password; overrides --password"`
 
 	// Proxy and Tor settings
 	Proxy        string `long:"proxy" description:"Establish network connections and DNS lookups through a SOCKS5 proxy (e.g. 127.0.0.1:9050)"`
@@ -125,7 +125,7 @@ type config struct {
 	ProxyPass    string `long:"proxypass" default-mask:"-" description:"Proxy server password"`
 	CircuitLimit int    `long:"circuitlimit" description:"Set maximum number of open Tor circuits; used only when --torisolation is enabled"`
 	TorIsolation bool   `long:"torisolation" description:"Enable Tor stream isolation by randomizing user credentials for each connection"`
-	NoDcrdProxy  bool   `long:"nodcrdproxy" description:"Never use configured proxy to dial dcrd websocket connectons"`
+	NoDcrdProxy  bool   `long:"noexccdproxy" description:"Never use configured proxy to dial exccd websocket connectons"`
 	dial         func(ctx context.Context, network, address string) (net.Conn, error)
 	lookup       func(name string) ([]net.IP, error)
 
@@ -145,8 +145,8 @@ type config struct {
 	NoLegacyRPC            bool                    `long:"nolegacyrpc" description:"Disable JSON-RPC server"`
 	LegacyRPCMaxClients    int64                   `long:"rpcmaxclients" description:"Max JSON-RPC HTTP POST clients"`
 	LegacyRPCMaxWebsockets int64                   `long:"rpcmaxwebsockets" description:"Max JSON-RPC websocket clients"`
-	Username               string                  `short:"u" long:"username" description:"JSON-RPC username and default dcrd RPC username"`
-	Password               string                  `short:"P" long:"password" default-mask:"-" description:"JSON-RPC password and default dcrd RPC password"`
+	Username               string                  `short:"u" long:"username" description:"JSON-RPC username and default exccd RPC username"`
+	Password               string                  `short:"P" long:"password" default-mask:"-" description:"JSON-RPC password and default exccd RPC password"`
 	JSONRPCAuthType        string                  `long:"jsonrpcauthtype" description:"Method for JSON-RPC client authentication (basic or clientcert)"`
 
 	// IPC options

@@ -28,7 +28,7 @@ import (
 )
 
 var (
-	walletDataDirectory = dcrutil.AppDataDir("dcrwallet", false)
+	walletDataDirectory = dcrutil.AppDataDir("exccwallet", false)
 	newlineBytes        = []byte{'\n'}
 )
 

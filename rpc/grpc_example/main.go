@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	certificateFile      = filepath.Join(dcrutil.AppDataDir("dcrwallet", false), "rpc.cert")
+	certificateFile      = filepath.Join(dcrutil.AppDataDir("exccwallet", false), "rpc.cert")
 	walletClientCertFile = "client.pem" // must be part of ~/.dcrwallet/clients.pem
 	walletClientKeyFile  = "client-key.pem"
 )
