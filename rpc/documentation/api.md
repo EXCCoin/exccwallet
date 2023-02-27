@@ -84,7 +84,7 @@ rules of Semantic Versioning (SemVer) 2.0.0.
 ## `WalletLoaderService`
 
 The `WalletLoaderService` service provides the caller with functions related to
-the management of the wallet and its connection to the Decred network.  It has
+the management of the wallet and its connection to the Exchangecoin network.  It has
 no dependencies and is always running.
 
 **Methods:**
@@ -258,12 +258,12 @@ ___
 
 The `SpvSync` method begins the spv syncing process.  It will
 stream back progress to provide feedback on the current state of the wallet
-loading/bringup.  This is a long lived RPC and only end when canceled
+loading/bring-up.  This is a long-lived RPC and only end when canceled
 or upon received an error.
 
 **Request:** `SpvSyncRequest`
 
-- `bool discover_accounts`:  Whether or not the wallet should attempt to
+- `bool discover_accounts`:  Whether the wallet should attempt to
   discover accounts during discovery.  This requires the private passphrase to
   be set as well and will error otherwise.
 
@@ -311,15 +311,15 @@ ___
 
 The `RpcSync` method begins the syncing process via rpc connection to a daemon. 
 It will stream back progress to provide feedback on the current state of the
-wallet loading/bringup.  This is a long lived RPC and only end when canceled
+wallet loading/bring-up.  This is a long-lived RPC and only end when canceled
 or upon received an error.
 
 **Request:** `RpcSyncRequest`
 
 - `string network_address`: The host/IP and optional port of the RPC server to
   connect to.  IP addresses may be IPv4 or IPv6.  If the port is missing, a
-  default port is chosen corresponding to the default dcrd RPC port of the
-  active Decred network.
+  default port is chosen corresponding to the default exccd RPC port of the
+  active Exchangecoin network.
 
 - `string username`: The RPC username required to authenticate to the RPC
   server.
@@ -330,7 +330,7 @@ or upon received an error.
   field has zero length and the network address describes a loopback connection
   (`localhost`, `127.0.0.1`, or `::1`) TLS will be disabled.
 
-- `bool discover_accounts`:  Whether or not the wallet should attempt to
+- `bool discover_accounts`:  Whether the wallet should attempt to
   discover accounts during discovery.  This requires the private passphrase to
   be set as well and will error otherwise.
 
@@ -976,7 +976,7 @@ ___
 #### `Rescan`
 
 The `Rescan` method begins a rescan for all relevant transactions involving all
-active addresses and watched outpoints.  Rescans can be time consuming depending
+active addresses and watched outpoints.  Rescans can be time-consuming depending
 on the amount of data that must be checked, and the size of the blockchain.  If
 transactions being scanned for are known to only exist after some height, the
 request can specify which block height to begin scanning from.  This RPC returns
@@ -1071,7 +1071,7 @@ wallet.
 
 - `string address`: The payment address string.
 
-- `string public_key`: The public key encoded as a string in the Decred encoding
+- `string public_key`: The public key encoded as a string in the Exchangecoin encoding
   format.
 
 **Expected errors:**
@@ -1096,7 +1096,7 @@ search for transactions involving the private key's associated payment address.
 
 - `string private_key_wif`: The private key, encoded using WIF.
 
-- `bool rescan`: Whether or not to perform a blockchain rescan for the imported
+- `bool rescan`: Whether to perform a blockchain rescan for the imported
   key.
 
 **Response:** `ImportPrivateKeyResponse`
@@ -1584,7 +1584,7 @@ ___
 #### `PublishTransaction`
 
 The `PublishTransaction` method publishes a signed, serialized transaction to
-the Decred network.  If the transaction spends any of the wallet's unspent
+the Exchangecoin network.  If the transaction spends any of the wallet's unspent
 outputs or creates a new output controlled by the wallet, it is saved by the
 wallet and republished later if it or a double spend are not mined.
 
@@ -2582,7 +2582,7 @@ by the private passphrase.  This does not affect any other accounts.
 #### `GetTrackedVSPTickets`
 
 The `GetTrackedVSPTickets` request returns the list of tickets currently tracked
-by the VSP client inside dcrwallet. This only applies to tickets purchased
+by the VSP client inside exccwallet. This only applies to tickets purchased
 following the new vspd mode.
 
 **Request** `GetTrackedVSPTicketsRequest`
@@ -3289,7 +3289,7 @@ perform actions in the P2P network related to blockchain data not necessarily
 tracked by the wallet.
 
 In order to use this service, the wallet must have already been loaded. Most
-operations fail if the wallet is not connected to an underlying dcrd instance
+operations fail if the wallet is not connected to an underlying exccd instance
 (when running in regular RPC mode) or to remote peers (when running in SPV mode).
 
 **Methods**
