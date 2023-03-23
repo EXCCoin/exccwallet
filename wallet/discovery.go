@@ -723,7 +723,9 @@ func rpcFromPeer(p Peer) (*dcrd.RPC, bool) {
 // again.
 func (w *Wallet) DiscoverActiveAddresses(ctx context.Context, p Peer, startBlock *chainhash.Hash, discoverAccts bool, gapLimit uint32) error {
 	const op errors.Op = "wallet.DiscoverActiveAddresses"
+	_, slip0044CoinType := udb.CoinTypes(w.chainParams)
 	var activeCoinType uint32
+	var coinTypeKnown, isSLIP0044CoinType bool
 	err := walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
 		var err error
 		activeCoinType, err = w.manager.CoinType(dbtx)
@@ -733,6 +735,8 @@ func (w *Wallet) DiscoverActiveAddresses(ctx context.Context, p Peer, startBlock
 		if err != nil {
 			return err
 		}
+		coinTypeKnown = true
+		isSLIP0044CoinType = activeCoinType == slip0044CoinType
 		log.Debugf("DiscoverActiveAddresses: activeCoinType=%d", activeCoinType)
 		return nil
 	})
@@ -950,6 +954,39 @@ func (w *Wallet) DiscoverActiveAddresses(ctx context.Context, p Peer, startBlock
 		}
 	}
 
-	log.Infof("Finished address discovery")
-	return nil
+	// If the wallet does not know the current coin type (e.g. it is a watching
+	// only wallet created from an account master pubkey) or when the wallet
+	// uses the SLIP0044 coin type, there is nothing more to do.
+	if !coinTypeKnown || isSLIP0044CoinType {
+		log.Infof("Finished address discovery")
+		return nil
+	}
+
+	// Do not upgrade legacy coin type wallets if there are returned or used
+	// addresses or coin type upgrades are disabled.
+	if !isSLIP0044CoinType && (w.disableCoinTypeUpgrades ||
+		len(finder.usage) != 1 ||
+		finder.usage[0].extLastUsed != ^uint32(0) ||
+		finder.usage[0].intLastUsed != ^uint32(0)) {
+		log.Infof("Finished address discovery")
+		log.Warnf("Wallet contains addresses derived for the legacy BIP0044 " +
+			"coin type and seed restores may not work with some other wallet " +
+			"software")
+		return nil
+	}
+
+	// Upgrade the coin type.
+	log.Infof("Upgrading wallet from legacy coin type %d to SLIP0044 coin type %d",
+		activeCoinType, slip0044CoinType)
+	err = w.UpgradeToSLIP0044CoinType(ctx)
+	if err != nil {
+		log.Errorf("Coin type upgrade failed: %v", err)
+		log.Warnf("Continuing with legacy BIP0044 coin type -- seed restores " +
+			"may not work with some other wallet software")
+		return nil
+	}
+	log.Infof("Upgraded coin type.")
+
+	// Perform address discovery a second time using the upgraded coin type.
+	return w.DiscoverActiveAddresses(ctx, p, startBlock, discoverAccts, gapLimit)
 }

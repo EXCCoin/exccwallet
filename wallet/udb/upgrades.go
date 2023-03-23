@@ -75,9 +75,14 @@ const (
 	// transactions.
 	hasExpiryFixedVersion = 8
 
-	// dummy is a noop version used by excc just to match wallet version number
-	// with upstream decred version.
-	dummy = 9
+	// slip0044CoinTypeVersion is the nine version of the database.  It
+	// introduces the possibility of the BIP0044 coin type key being either the
+	// legacy coin type used by earlier versions of the wallet, or the coin type
+	// assigned to Decred in SLIP0044.  The upgrade does not add or remove any
+	// required keys (the upgrade is done in a backwards-compatible way) but the
+	// database version is bumped to prevent older software from assuming that
+	// coin type 20 exists (the upgrade is not forwards-compatible).
+	slip0044CoinTypeVersion = 9
 
 	// cfVersion is the tenth version of the database.  It adds a bucket to
 	// store compact filters, which are required for Decred's SPV
@@ -214,7 +219,7 @@ var upgrades = [...]func(walletdb.ReadWriteTx, []byte, *chaincfg.Params) error{
 	ticketBucketVersion - 1:               ticketBucketUpgrade,
 	hasExpiryVersion - 1:                  hasExpiryUpgrade,
 	hasExpiryFixedVersion - 1:             hasExpiryFixedUpgrade,
-	dummy - 1:                             dummyUpgrade,
+	slip0044CoinTypeVersion - 1:           slip0044CoinTypeUpgrade,
 	cfVersion - 1:                         cfUpgrade,
 	lastProcessedTxsBlockVersion - 1:      lastProcessedTxsBlockUpgrade,
 	ticketCommitmentsVersion - 1:          ticketCommitmentsUpgrade,
@@ -822,22 +827,19 @@ func hasExpiryFixedUpgrade(tx walletdb.ReadWriteTx, publicPassphrase []byte, par
 	return unifiedDBMetadata{}.putVersion(metadataBucket, newVersion)
 }
 
-// dummyUpgrade does upgrade from version 8 to 9 without chainging anything.
-// it's sole purpose is to make excc wallets match decred wallets version
-// so stealing code later would be easier.
-func dummyUpgrade(tx walletdb.ReadWriteTx, bytes []byte, params *chaincfg.Params) error {
+func slip0044CoinTypeUpgrade(tx walletdb.ReadWriteTx, publicPassphrase []byte, params *chaincfg.Params) error {
 	const oldVersion = 8
 	const newVersion = 9
 
 	metadataBucket := tx.ReadWriteBucket(unifiedDBMetadata{}.rootBucketKey())
 
-	// Assert that this function is only called on version 9 databases.
+	// Assert that this function is only called on version 8 databases.
 	dbVersion, err := unifiedDBMetadata{}.getVersion(metadataBucket)
 	if err != nil {
 		return err
 	}
 	if dbVersion != oldVersion {
-		return errors.E(errors.Invalid, "dummyUpgrade inappropriately called")
+		return errors.E(errors.Invalid, "slip0044CoinTypeUpgrade inappropriately called")
 	}
 
 	// Write the new database version.

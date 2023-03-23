@@ -3860,11 +3860,14 @@ func votingXprivFromSeed(seed []byte, params *chaincfg.Params) (*hdkeychain.Exte
 
 	// Generate the BIP0044 HD key structure to ensure the provided seed
 	// can generate the required structure with no issues.
-	coinTypeSLIP0044KeyPriv, acctKeySLIP0044Priv, err := udb.HDKeysFromSeed(seed, params)
+	coinTypeLegacyKeyPriv, coinTypeSLIP0044KeyPriv, acctKeyLegacyPriv, acctKeySLIP0044Priv, err := udb.HDKeysFromSeed(seed, params)
 	if err != nil {
 		return nil, err
 	}
+	coinTypeLegacyKeyPriv.Zero()
 	coinTypeSLIP0044KeyPriv.Zero()
+	acctKeyLegacyPriv.Zero()
+
 	return acctKeySLIP0044Priv, nil
 }
 

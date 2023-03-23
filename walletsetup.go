@@ -56,6 +56,7 @@ func createWallet(ctx context.Context, cfg *config) error {
 		cfg.MixSplitLimit)
 
 	var privPass, pubPass, seed []byte
+	var imported bool
 	var err error
 	c := make(chan struct{}, 1)
 	go func() {
@@ -85,7 +86,7 @@ func createWallet(ctx context.Context, cfg *config) error {
 		// automatically generated value the user has already confirmed or a
 		// value the user has entered which has already been validated.
 		// There is no config flag to set the seed.
-		seed, _, err = prompt.Seed(r)
+		seed, imported, err = prompt.Seed(r)
 	}()
 	select {
 	case <-ctx.Done():
@@ -100,6 +101,17 @@ func createWallet(ctx context.Context, cfg *config) error {
 	w, err := loader.CreateNewWallet(ctx, pubPass, privPass, seed)
 	if err != nil {
 		return err
+	}
+
+	// Upgrade to the SLIP0044 cointype if this is a new (rather than
+	// user-provided) seed, and also unconditionally on simnet (to prevent
+	// the mining address printed below from ever becoming invalid if a
+	// cointype upgrade occurred later).
+	if !imported || cfg.SimNet {
+		err := w.UpgradeToSLIP0044CoinType(ctx)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Display a mining address when creating a simnet wallet.
