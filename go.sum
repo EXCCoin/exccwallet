@@ -39,6 +39,7 @@ github.com/EXCCoin/exccd/blockchain/v4 v4.0.0-20230222133511-27be5a3e13e3/go.mod
 github.com/EXCCoin/exccd/blockchain/v4 v4.0.0-20230222134430-694fa0700495/go.mod h1:guZDLPGbJ7MS3hqJzK1zRiFl6kZxP7lFojciG7zEiIk=
 github.com/EXCCoin/exccd/blockchain/v4 v4.0.0-20230414141857-db7e0eac8be9 h1:jRHR6CkHz/vSQviNlRBWx6J/ip3hSfz2zSv0+03kKXQ=
 github.com/EXCCoin/exccd/blockchain/v4 v4.0.0-20230414141857-db7e0eac8be9/go.mod h1:lhiHnz08kopKVTy1YdmpQWF5msQNgDA/lDvAC1hq49E=
+github.com/EXCCoin/exccd/blockchain/v4 v4.0.0-20231114084634-503e41f75524 h1:Ufl2g1P1+mpXTnywDLjU9Vt6sSjop0QfHaI3Jbayyos=
 github.com/EXCCoin/exccd/blockchain/v4 v4.0.0-20231114084634-503e41f75524/go.mod h1:lhiHnz08kopKVTy1YdmpQWF5msQNgDA/lDvAC1hq49E=
 github.com/EXCCoin/exccd/certgen v0.0.0-20230222133511-27be5a3e13e3/go.mod h1:+PXoOUe7OFJ526jHm1z/jn99G550giHnlkUvf3xyVV0=
 github.com/EXCCoin/exccd/certgen v0.0.0-20230222134430-694fa0700495/go.mod h1:+PXoOUe7OFJ526jHm1z/jn99G550giHnlkUvf3xyVV0=
