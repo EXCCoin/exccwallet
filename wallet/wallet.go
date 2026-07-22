@@ -1580,6 +1580,7 @@ func (w *Wallet) CreateMultisigTx(ctx context.Context, account uint32, amount dc
 type PurchaseTicketsRequest struct {
 	Count         int
 	SourceAccount uint32
+	SpendLimit    dcrutil.Amount
 	VotingAddress stdaddr.StakeAddress
 	MinConf       int32
 	Expiry        int32

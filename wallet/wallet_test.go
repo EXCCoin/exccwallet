@@ -11,7 +11,31 @@ import (
 
 	"github.com/EXCCoin/exccwallet/v2/errors"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
+	"github.com/EXCCoin/exccd/dcrutil/v4"
 )
+
+func TestTicketPriceSpendLimit(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		limit, price dcrutil.Amount
+		wantErr      bool
+	}{
+		{0, 2, false},
+		{1, 1, false},
+		{2, 1, false},
+		{1, 2, true},
+	}
+	for _, test := range tests {
+		err := checkTicketPrice(test.limit, test.price)
+		if (err != nil) != test.wantErr {
+			t.Errorf("checkTicketPrice(%v, %v) error = %v, wantErr %v",
+				test.limit, test.price, err, test.wantErr)
+		}
+		if test.wantErr && !errors.Is(err, errors.Invalid) {
+			t.Errorf("error kind = %v, want Invalid", err)
+		}
+	}
+}
 
 func TestCoinbaseMatured(t *testing.T) {
 	t.Parallel()

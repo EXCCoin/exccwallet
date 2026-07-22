@@ -3437,6 +3437,7 @@ func (s *Server) purchaseTicket(ctx context.Context, icmd interface{}) (interfac
 	request := &wallet.PurchaseTicketsRequest{
 		Count:         numTickets,
 		SourceAccount: account,
+		SpendLimit:    spendLimit,
 		VotingAddress: ticketAddr,
 		MinConf:       minConf,
 		Expiry:        expiry,

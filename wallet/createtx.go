@@ -59,6 +59,14 @@ const (
 		txscript.ScriptVerifyTreasury
 )
 
+func checkTicketPrice(spendLimit, ticketPrice dcrutil.Amount) error {
+	if spendLimit > 0 && ticketPrice > spendLimit {
+		return errors.E(errors.Invalid,
+			errors.Errorf("ticket price %v above spend limit %v", ticketPrice, spendLimit))
+	}
+	return nil
+}
+
 // Input provides transaction inputs referencing spendable outputs.
 type Input struct {
 	OutPoint wire.OutPoint
@@ -1286,6 +1294,9 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 		ticketPrice, err = n.StakeDifficulty(ctx)
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := checkTicketPrice(req.SpendLimit, ticketPrice); err != nil {
 		return nil, err
 	}
 
