@@ -11,6 +11,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
 	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
@@ -166,6 +167,34 @@ func setupWallet(t *testing.T, cfg *Config) (*Wallet, walletdb.DB, func()) {
 }
 
 type newAddressFunc func(*Wallet, context.Context, uint32, ...NextAddressCallOption) (stdaddr.Address, error)
+
+func TestSyncLastReturnedExternalAddress(t *testing.T) {
+	w, _, teardown := setupWallet(t, &walletConfig)
+	defer teardown()
+
+	w.addressBuffersMu.Lock()
+	acct := w.addressBuffers[defaultAccount]
+	acct.albExternal.lastUsed = 0
+	acct.albExternal.cursor = 0
+	internalCursor := acct.albInternal.cursor
+	w.addressBuffersMu.Unlock()
+
+	err := w.SyncLastReturnedAddress(context.Background(), defaultAccount,
+		udb.ExternalBranch, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w.addressBuffersMu.Lock()
+	defer w.addressBuffersMu.Unlock()
+	if acct.albExternal.cursor != 3 {
+		t.Fatalf("external cursor = %d, want 3", acct.albExternal.cursor)
+	}
+	if acct.albInternal.cursor != internalCursor {
+		t.Fatalf("internal cursor changed from %d to %d",
+			internalCursor, acct.albInternal.cursor)
+	}
+}
 
 func testKnownAddresses(tc *testContext, prefix string, unlock bool, newAddr newAddressFunc, tests []expectedAddr) {
 	w, db, teardown := setupWallet(tc.t, &walletConfig)

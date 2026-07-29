@@ -303,7 +303,7 @@ func run(ctx context.Context) error {
 			purchaseAccount    uint32 // enableticketbuyer
 			votingAccount      uint32 // enableticketbuyer
 			mixedAccount       uint32 // (enableticketbuyer && csppserver) || mixchange
-			changeAccount      uint32 // (enableticketbuyer && csppserver) || mixchange
+			changeAccount      uint32 // enableticketbuyer || mixchange
 			ticketSplitAccount uint32 // enableticketbuyer && csppserver
 
 			votingAddr  = cfg.TBOpts.votingAddress
@@ -322,6 +322,13 @@ func run(ctx context.Context) error {
 			if cfg.TBOpts.VotingAccount != "" {
 				votingAccount = lookup("ticketbuyer.votingaccount", cfg.TBOpts.VotingAccount)
 				votingAddr = nil
+			}
+			if cfg.CSPPServer == "" {
+				if cfg.ChangeAccount != "" {
+					changeAccount = lookup("changeaccount", cfg.ChangeAccount)
+				} else {
+					changeAccount = purchaseAccount
+				}
 			}
 		}
 		if (cfg.EnableTicketBuyer && cfg.CSPPServer != "") || cfg.MixChange {

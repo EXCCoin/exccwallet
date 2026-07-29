@@ -163,7 +163,7 @@ type config struct {
 	mixedAccount       string
 	mixedBranch        uint32
 	TicketSplitAccount string `long:"ticketsplitaccount" description:"Account to derive fresh addresses from for mixed ticket splits; uses mixedaccount if unset"`
-	ChangeAccount      string `long:"changeaccount" description:"Account used to derive unmixed CoinJoin outputs in CoinShuffle++ protocol"`
+	ChangeAccount      string `long:"changeaccount" description:"Account to send change when ticket autobuying or mixing; required when mixing"`
 	MixChange          bool   `long:"mixchange" description:"Use CoinShuffle++ to mix change account outputs into mix account"`
 	MixSplitLimit      int    `long:"mixsplitlimit" description:"Connection limit to CoinShuffle++ server per change amount"`
 

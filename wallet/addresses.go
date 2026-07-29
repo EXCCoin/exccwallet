@@ -816,7 +816,7 @@ func (w *Wallet) BIP0044BranchNextIndexes(ctx context.Context, account uint32) (
 // BIP00044 account branch.  The next returned address for the branch will be
 // child+1.
 func (w *Wallet) SyncLastReturnedAddress(ctx context.Context, account, branch, child uint32) error {
-	const op errors.Op = "wallet.ExtendWatchedAddresses"
+	const op errors.Op = "wallet.SyncLastReturnedAddress"
 
 	var (
 		branchXpub *hdkeychain.ExtendedKey
@@ -833,7 +833,7 @@ func (w *Wallet) SyncLastReturnedAddress(ctx context.Context, account, branch, c
 		var alb *addressBuffer
 		switch branch {
 		case udb.ExternalBranch:
-			alb = &acctData.albInternal
+			alb = &acctData.albExternal
 		case udb.InternalBranch:
 			alb = &acctData.albInternal
 		default:
