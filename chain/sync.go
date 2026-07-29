@@ -624,6 +624,10 @@ func (s *Syncer) blockConnected(ctx context.Context, params json.RawMessage) err
 	}
 
 	blockHash := header.BlockHash()
+	haveBlock, _, _ := s.wallet.BlockInMainChain(ctx, &blockHash)
+	if haveBlock {
+		return nil
+	}
 	filter, proofIndex, proof, err := s.rpc.CFilterV2(ctx, &blockHash)
 	if err != nil {
 		return err
