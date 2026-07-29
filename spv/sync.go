@@ -1030,7 +1030,7 @@ func (s *Syncer) handleBlockAnnouncements(ctx context.Context, rp *p2p.RemotePee
 				}
 			}
 
-			n := wallet.NewBlockNode(headers[i], &hash, nil)
+			n := wallet.NewBlockNode(headers[i], &hash, nil, nil)
 			newBlocks = append(newBlocks, n)
 		}
 
@@ -1096,9 +1096,15 @@ func (s *Syncer) handleBlockAnnouncements(ctx context.Context, rp *p2p.RemotePee
 			if err != nil {
 				return err
 			}
+			for _, n := range bestChain {
+				n.RelevantTxs = matchingTxs[*n.Hash]
+				if n.RelevantTxs == nil {
+					n.RelevantTxs = make([]*wire.MsgTx, 0)
+				}
+			}
 		}
 
-		prevChain, err := s.wallet.ChainSwitch(ctx, &s.sidechains, bestChain, matchingTxs)
+		prevChain, err := s.wallet.ChainSwitch(ctx, &s.sidechains, bestChain)
 		if err != nil {
 			return err
 		}
@@ -1219,7 +1225,7 @@ func (s *Syncer) getHeaders(ctx context.Context, rp *p2p.RemotePeer) error {
 					return err
 				}
 
-				nodes[i] = wallet.NewBlockNode(header, &hash, filter)
+				nodes[i] = wallet.NewBlockNode(header, &hash, filter, nil)
 				if wallet.BadCheckpoint(cnet, &hash, int32(header.Height)) {
 					nodes[i].BadCheckpoint()
 				}
@@ -1282,7 +1288,7 @@ func (s *Syncer) getHeaders(ctx context.Context, rp *p2p.RemotePeer) error {
 			return err
 		}
 
-		prevChain, err := s.wallet.ChainSwitch(ctx, &s.sidechains, bestChain, nil)
+		prevChain, err := s.wallet.ChainSwitch(ctx, &s.sidechains, bestChain)
 		if err != nil {
 			s.sidechainMu.Unlock()
 			return err

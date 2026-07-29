@@ -174,7 +174,13 @@ func TestInsertsCreditsDebitsRollbacks(t *testing.T) {
 		{
 			name: "rollback confirmed credit",
 			f: func(s *Store, dbtx walletdb.ReadWriteTx) (*Store, error) {
-				err := s.Rollback(dbtx, int32(b1H.Height))
+				removed, err := s.RollbackWithTransactions(dbtx, int32(b1H.Height))
+				if err == nil {
+					txs := removed[b1Hash]
+					if len(txs) != 1 || txs[0].TxHash() != tx1Rec.Hash {
+						t.Fatalf("removed transactions = %v, want %v", txs, tx1Rec.Hash)
+					}
+				}
 				return s, err
 			},
 			bal: 0,

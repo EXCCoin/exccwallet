@@ -1788,6 +1788,20 @@ func approvesParent(voteBits uint16) bool {
 // Rollback removes all blocks at height onwards, moving any transactions within
 // each block to the unconfirmed pool.
 func (s *Store) Rollback(dbtx walletdb.ReadWriteTx, height int32) error {
+	return s.rollback(dbtx, height, nil)
+}
+
+// RollbackWithTransactions performs a rollback and returns the removed
+// transactions grouped by their former block hash.
+func (s *Store) RollbackWithTransactions(dbtx walletdb.ReadWriteTx, height int32) (map[chainhash.Hash][]*wire.MsgTx, error) {
+	removedTxs := make(map[chainhash.Hash][]*wire.MsgTx)
+	err := s.rollback(dbtx, height, removedTxs)
+	return removedTxs, err
+}
+
+func (s *Store) rollback(dbtx walletdb.ReadWriteTx, height int32,
+	removedTxs map[chainhash.Hash][]*wire.MsgTx) error {
+
 	// Note: does not stake validate the parent block at height-1.  Assumes the
 	// rollback is being done to add more blocks starting at height, and stake
 	// validation will occur when that block is attached.
@@ -1846,6 +1860,10 @@ func (s *Store) Rollback(dbtx walletdb.ReadWriteTx, height int32) error {
 			err = deleteTxRecord(ns, txHash, &b.Block)
 			if err != nil {
 				return err
+			}
+			if removedTxs != nil {
+				msgTx := rec.MsgTx
+				removedTxs[b.Hash] = append(removedTxs[b.Hash], &msgTx)
 			}
 
 			// Handle coinbase transactions specially since they are

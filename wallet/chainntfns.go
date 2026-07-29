@@ -84,11 +84,10 @@ func (w *Wallet) extendMainChain(ctx context.Context, op errors.Op, dbtx walletd
 
 // ChainSwitch updates the wallet's main chain, either by extending the chain
 // with new blocks, or switching to a better sidechain.  A sidechain for removed
-// blocks (if any) is returned.  If relevantTxs is non-nil, the block marker for
-// the latest block with processed transactions is updated for the new tip
-// block.
-func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest, chain []*BlockNode,
-	relevantTxs map[chainhash.Hash][]*wire.MsgTx) ([]*BlockNode, error) {
+// blocks (if any) is returned.  The processed transaction marker is advanced
+// through the last consecutive block with known relevant transactions.
+func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest,
+	chain []*BlockNode) ([]*BlockNode, error) {
 	const op errors.Op = "wallet.ChainSwitch"
 
 	if len(chain) == 0 {
@@ -138,7 +137,7 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest, chain
 
 				// DetachedBlocks and prevChain are sorted in order of increasing heights.
 				chainTipChanges.DetachedBlocks[i-sideChainForkHeight] = &hash
-				prevChain[i-sideChainForkHeight] = NewBlockNode(header, &hash, filter)
+				prevChain[i-sideChainForkHeight] = NewBlockNode(header, &hash, filter, nil)
 
 				// For transaction notifications, the blocks are notified in reverse
 				// height order.
@@ -154,9 +153,12 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest, chain
 
 			// Remove blocks on the current main chain that are at or above the
 			// height of the block that begins the side chain.
-			err := w.txStore.Rollback(dbtx, sideChainForkHeight)
+			removedTxs, err := w.txStore.RollbackWithTransactions(dbtx, sideChainForkHeight)
 			if err != nil {
 				return err
+			}
+			for _, n := range prevChain {
+				n.RelevantTxs = removedTxs[*n.Hash]
 			}
 		}
 
@@ -166,7 +168,7 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest, chain
 					"wallet to the latest version.", voteVersion(w.chainParams))
 			}
 
-			watch, err := w.extendMainChain(ctx, op, dbtx, n.Header, n.FilterV2, relevantTxs[*n.Hash])
+			watch, err := w.extendMainChain(ctx, op, dbtx, n.Header, n.FilterV2, n.RelevantTxs)
 			if err != nil {
 				return err
 			}
@@ -176,7 +178,14 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest, chain
 			chainTipChanges.AttachedBlocks = append(chainTipChanges.AttachedBlocks, n.Hash)
 		}
 
-		if relevantTxs != nil {
+		var marker *chainhash.Hash
+		for _, n := range chain {
+			if n.RelevantTxs == nil {
+				break
+			}
+			marker = n.Hash
+		}
+		if marker != nil {
 			// To avoid skipped blocks, the marker is not advanced if there is a
 			// gap between the existing rescan point (main chain fork point of
 			// the current marker) and the first block attached in this chain
@@ -190,7 +199,6 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest, chain
 				return err
 			}
 			if !(rHeader.Height+1 < chain[0].Header.Height) {
-				marker := chain[len(chain)-1].Hash
 				log.Debugf("Updating processed txs block marker to %v", marker)
 				err := w.txStore.UpdateProcessedTxsBlockMarker(dbtx, marker)
 				if err != nil {
@@ -224,7 +232,7 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest, chain
 	if len(chainTipChanges.AttachedBlocks) != 0 {
 		w.recentlyPublishedMu.Lock()
 		for _, node := range chain {
-			for _, tx := range relevantTxs[*node.Hash] {
+			for _, tx := range node.RelevantTxs {
 				txHash := tx.TxHash()
 				delete(w.recentlyPublished, txHash)
 			}

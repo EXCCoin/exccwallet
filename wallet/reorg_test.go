@@ -112,7 +112,7 @@ func (tw *tw) assertNoBetterChain(forest *SidechainForest) {
 
 func (tw *tw) chainSwitch(forest *SidechainForest, chain []*BlockNode) {
 	ctx := context.Background()
-	prevChain, err := tw.ChainSwitch(context.Background(), forest, chain, nil)
+	prevChain, err := tw.ChainSwitch(context.Background(), forest, chain)
 	if err != nil {
 		tw.Fatal(err)
 	}
