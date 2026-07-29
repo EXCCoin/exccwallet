@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
 	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
@@ -193,6 +194,34 @@ func TestSyncLastReturnedExternalAddress(t *testing.T) {
 	if acct.albInternal.cursor != internalCursor {
 		t.Fatalf("internal cursor changed from %d to %d",
 			internalCursor, acct.albInternal.cursor)
+	}
+}
+
+func TestNextAddressRollsBackOnError(t *testing.T) {
+	w, db, teardown := setupWallet(t, &walletConfig)
+	defer teardown()
+
+	_, err := w.nextAddress(context.Background(), "test", nil, nil, "",
+		defaultAccount, 2)
+	if err == nil {
+		t.Fatal("nextAddress unexpectedly accepted invalid branch")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		tx, err := db.BeginReadWriteTx()
+		if err == nil {
+			err = tx.Rollback()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("nextAddress left a write transaction open")
 	}
 }
 

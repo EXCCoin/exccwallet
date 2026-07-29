@@ -180,11 +180,10 @@ SplitPoints:
 	}
 
 	var change *wire.TxOut
-	var updates []func(walletdb.ReadWriteTx) error
+	updates := make(accountBranchChildUpdates, 0, 1)
 	if changeValue > 0 {
-		persist := w.deferPersistReturnedChild(ctx, &updates)
 		const accountName = "" // not used, so can be faked.
-		addr, err := w.nextAddress(ctx, op, persist,
+		addr, err := w.nextAddress(ctx, op, &updates, nil,
 			accountName, changeAccount, udb.InternalBranch, WithGapPolicyIgnore())
 		if err != nil {
 			return errors.E(op, err)
@@ -235,10 +234,9 @@ SplitPoints:
 	var watch []wire.OutPoint
 	w.lockedOutpointMu.Lock()
 	err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
-		for _, f := range updates {
-			if err := f(dbtx); err != nil {
-				return err
-			}
+		err := updates.UpdateDB(ctx, w, dbtx)
+		if err != nil {
+			return err
 		}
 		rec, err := udb.NewTxRecordFromMsgTx(cj.tx, time.Now())
 		if err != nil {

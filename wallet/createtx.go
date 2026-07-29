@@ -111,7 +111,7 @@ func (w *Wallet) NewUnsignedTransaction(ctx context.Context, outputs []*wire.TxO
 	w.lockedOutpointMu.Lock()
 
 	var authoredTx *txauthor.AuthoredTx
-	var changeSourceUpdates []func(walletdb.ReadWriteTx) error
+	var changeSourceUpdates accountBranchChildUpdates
 	err := walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
 		addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
 		txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
@@ -151,7 +151,7 @@ func (w *Wallet) NewUnsignedTransaction(ctx context.Context, outputs []*wire.TxO
 
 		if changeSource == nil {
 			changeSource = &p2PKHChangeSource{
-				persist: w.deferPersistReturnedChild(ctx, &changeSourceUpdates),
+				updates: &changeSourceUpdates,
 				account: account,
 				wallet:  w,
 				ctx:     context.Background(),
@@ -171,15 +171,7 @@ func (w *Wallet) NewUnsignedTransaction(ctx context.Context, outputs []*wire.TxO
 		return nil, errors.E(op, err)
 	}
 	if len(changeSourceUpdates) != 0 {
-		err := walletdb.Update(ctx, w.db, func(tx walletdb.ReadWriteTx) error {
-			for _, up := range changeSourceUpdates {
-				err := up(tx)
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+		err := changeSourceUpdates.UpdateDB(ctx, w, nil)
 		if err != nil {
 			return nil, errors.E(op, err)
 		}
@@ -347,7 +339,7 @@ type authorTx struct {
 	isTreasury         bool
 
 	atx                 *txauthor.AuthoredTx
-	changeSourceUpdates []func(walletdb.ReadWriteTx) error
+	changeSourceUpdates accountBranchChildUpdates
 	watch               []wire.OutPoint
 }
 
@@ -372,7 +364,7 @@ func (w *Wallet) authorTx(ctx context.Context, op errors.Op, a *authorTx) error 
 	w.lockedOutpointMu.Lock()
 
 	var atx *txauthor.AuthoredTx
-	var changeSourceUpdates []func(walletdb.ReadWriteTx) error
+	changeSourceUpdates := make(accountBranchChildUpdates, 0, 1)
 	err := walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
 		addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
 		txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
@@ -384,16 +376,14 @@ func (w *Wallet) authorTx(ctx context.Context, op errors.Op, a *authorTx) error 
 		var changeSource txauthor.ChangeSource
 		if a.isTreasury {
 			changeSource = &p2PKHTreasuryChangeSource{
-				persist: w.deferPersistReturnedChild(ctx,
-					&changeSourceUpdates),
+				updates: &changeSourceUpdates,
 				account: a.changeAccount,
 				wallet:  w,
 				ctx:     ctx,
 			}
 		} else {
 			changeSource = &p2PKHChangeSource{
-				persist: w.deferPersistReturnedChild(ctx,
-					&changeSourceUpdates),
+				updates:   &changeSourceUpdates,
 				account:   a.changeAccount,
 				wallet:    w,
 				ctx:       ctx,
@@ -496,16 +486,13 @@ func (w *Wallet) recordAuthoredTx(ctx context.Context, op errors.Op, a *authorTx
 	// before publishing the transaction to the network.
 	var watch []wire.OutPoint
 	err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
-		for _, up := range a.changeSourceUpdates {
-			err := up(dbtx)
-			if err != nil {
-				return err
-			}
+		err := a.changeSourceUpdates.UpdateDB(ctx, w, dbtx)
+		if err != nil {
+			return err
 		}
 
 		// TODO: this can be improved by not using the same codepath as notified
 		// relevant transactions, since this does a lot of extra work.
-		var err error
 		watch, err = w.processTransactionRecord(ctx, dbtx, rec, nil, nil)
 		return err
 	})
@@ -645,7 +632,7 @@ func (w *Wallet) txToMultisigInternal(ctx context.Context, op errors.Op, dbtx wa
 	}
 	if totalInput > amount+feeEst {
 		changeSource := p2PKHChangeSource{
-			persist: w.persistReturnedChild(ctx, dbtx),
+			dbtx:    dbtx,
 			account: account,
 			wallet:  w,
 			ctx:     ctx,
@@ -784,7 +771,7 @@ func (w *Wallet) compressWalletInternal(ctx context.Context, op errors.Op, dbtx 
 	// Check if output address is default, and generate a new address if needed
 	if changeAddr == nil {
 		const accountName = "" // not used, so can be faked.
-		changeAddr, err = w.newChangeAddress(ctx, op, w.persistReturnedChild(ctx, dbtx),
+		changeAddr, err = w.newChangeAddress(ctx, op, nil, dbtx,
 			accountName, account, gapPolicyIgnore)
 		if err != nil {
 			return nil, errors.E(op, err)
@@ -1001,20 +988,13 @@ func (w *Wallet) mixedSplit(ctx context.Context, req *PurchaseTicketsRequest, ne
 		mixOut[i] = &wire.TxOut{Value: int64(neededPerTicket), Version: 0, PkScript: p2pkhSizedScript}
 	}
 	relayFee := w.RelayFee()
-	var changeSourceUpdates []func(walletdb.ReadWriteTx) error
+	changeSourceUpdates := make(accountBranchChildUpdates, 0, 1)
 	defer func() {
 		if err != nil {
 			return
 		}
 
-		err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
-			for _, f := range changeSourceUpdates {
-				if err := f(dbtx); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+		err = changeSourceUpdates.UpdateDB(ctx, w, nil)
 	}()
 	var unlockOutpoints []*wire.OutPoint
 	defer func() {
@@ -1041,7 +1021,7 @@ func (w *Wallet) mixedSplit(ctx context.Context, req *PurchaseTicketsRequest, ne
 		inputSource := w.txStore.MakeInputSource(txmgrNs, addrmgrNs, req.SourceAccount,
 			req.MinConf, tipHeight, ignoreInput)
 		changeSource := &p2PKHChangeSource{
-			persist:   w.deferPersistReturnedChild(ctx, &changeSourceUpdates),
+			updates:   &changeSourceUpdates,
 			account:   req.ChangeAccount,
 			wallet:    w,
 			ctx:       ctx,
@@ -1265,7 +1245,7 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 
 	stakeAddrFunc := func(op errors.Op, account, branch uint32) (stdaddr.StakeAddress, error) {
 		const accountName = "" // not used, so can be faked.
-		a, err := w.nextAddress(ctx, op, w.persistReturnedChild(ctx, nil), accountName,
+		a, err := w.nextAddress(ctx, op, nil, nil, accountName,
 			account, branch, WithGapPolicyIgnore())
 		if err != nil {
 			return nil, err

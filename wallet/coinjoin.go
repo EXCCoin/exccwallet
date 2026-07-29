@@ -67,11 +67,10 @@ func (c *csppJoin) Gen() ([][]byte, error) {
 	const op errors.Op = "cspp.Gen"
 	gen := make([][]byte, c.mcount)
 	c.genScripts = make([][]byte, c.mcount)
-	var updates []func(walletdb.ReadWriteTx) error
+	updates := make(accountBranchChildUpdates, 0, c.mcount)
 	for i := 0; i < c.mcount; i++ {
-		persist := c.wallet.deferPersistReturnedChild(c.ctx, &updates)
 		const accountName = "" // not used, so can be faked.
-		mixAddr, err := c.wallet.nextAddress(c.ctx, op, persist,
+		mixAddr, err := c.wallet.nextAddress(c.ctx, op, &updates, nil,
 			accountName, c.mixAccount, c.mixBranch, WithGapPolicyIgnore())
 		if err != nil {
 			return nil, err
@@ -87,14 +86,7 @@ func (c *csppJoin) Gen() ([][]byte, error) {
 		c.genScripts[i] = script
 		gen[i] = hash160er.Hash160()[:]
 	}
-	err := walletdb.Update(c.ctx, c.wallet.db, func(dbtx walletdb.ReadWriteTx) error {
-		for _, f := range updates {
-			if err := f(dbtx); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	err := updates.UpdateDB(c.ctx, c.wallet, nil)
 	if err != nil {
 		return nil, errors.E(op, err)
 	}
