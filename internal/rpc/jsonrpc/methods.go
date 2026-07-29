@@ -1072,7 +1072,10 @@ func (s *Server) getBalance(ctx context.Context, icmd interface{}) (interface{},
 		return nil, errUnloadedWallet
 	}
 
-	minConf := int32(*cmd.MinConf)
+	minConf := int32(1)
+	if cmd.MinConf != nil {
+		minConf = int32(*cmd.MinConf)
+	}
 	if minConf < 0 {
 		return nil, rpcErrorf(dcrjson.ErrRPCInvalidParameter, "minconf must be non-negative")
 	}
@@ -1088,7 +1091,7 @@ func (s *Server) getBalance(ctx context.Context, icmd interface{}) (interface{},
 	}
 
 	if accountName == "*" {
-		balances, err := w.AccountBalances(ctx, int32(*cmd.MinConf))
+		balances, err := w.AccountBalances(ctx, minConf)
 		if err != nil {
 			return nil, err
 		}
@@ -1154,7 +1157,7 @@ func (s *Server) getBalance(ctx context.Context, icmd interface{}) (interface{},
 			return nil, err
 		}
 
-		bal, err := w.AccountBalance(ctx, account, int32(*cmd.MinConf))
+		bal, err := w.AccountBalance(ctx, account, minConf)
 		if err != nil {
 			// Expect account lookup to succeed
 			if errors.Is(err, errors.NotExist) {
@@ -2386,10 +2389,15 @@ func (s *Server) getReceivedByAccount(ctx context.Context, icmd interface{}) (in
 		return 0.0, nil
 	}
 
+	minConf := int32(1)
+	if cmd.MinConf != nil {
+		minConf = int32(*cmd.MinConf)
+	}
+
 	// TODO: This is more inefficient that it could be, but the entire
 	// algorithm is already dominated by reading every transaction in the
 	// wallet's history.
-	results, err := w.TotalReceivedForAccounts(ctx, int32(*cmd.MinConf))
+	results, err := w.TotalReceivedForAccounts(ctx, minConf)
 	if err != nil {
 		return nil, err
 	}
@@ -2413,7 +2421,11 @@ func (s *Server) getReceivedByAddress(ctx context.Context, icmd interface{}) (in
 	if err != nil {
 		return nil, err
 	}
-	total, err := w.TotalReceivedForAddr(ctx, addr, int32(*cmd.MinConf))
+	minConf := int32(1)
+	if cmd.MinConf != nil {
+		minConf = int32(*cmd.MinConf)
+	}
+	total, err := w.TotalReceivedForAddr(ctx, addr, minConf)
 	if err != nil {
 		if errors.Is(err, errors.NotExist) {
 			return nil, errAddressNotInWallet
@@ -2720,7 +2732,11 @@ func (s *Server) getTxOut(ctx context.Context, icmd interface{}) (interface{}, e
 
 	// Attempt to read the unspent txout info from wallet.
 	outpoint := wire.OutPoint{Hash: *txHash, Index: cmd.Vout, Tree: cmd.Tree}
-	utxo, err := w.UnspentOutput(ctx, outpoint, *cmd.IncludeMempool)
+	includeMempool := true
+	if cmd.IncludeMempool != nil {
+		includeMempool = *cmd.IncludeMempool
+	}
+	utxo, err := w.UnspentOutput(ctx, outpoint, includeMempool)
 	if err != nil && !errors.Is(err, errors.NotExist) {
 		return nil, err
 	}
@@ -2912,8 +2928,13 @@ func (s *Server) listAccounts(ctx context.Context, icmd interface{}) (interface{
 		return nil, errUnloadedWallet
 	}
 
+	minConf := int32(1)
+	if cmd.MinConf != nil {
+		minConf = int32(*cmd.MinConf)
+	}
+
 	accountBalances := map[string]float64{}
-	results, err := w.AccountBalances(ctx, int32(*cmd.MinConf))
+	results, err := w.AccountBalances(ctx, minConf)
 	if err != nil {
 		return nil, err
 	}
@@ -2968,7 +2989,12 @@ func (s *Server) listReceivedByAccount(ctx context.Context, icmd interface{}) (i
 		return nil, errUnloadedWallet
 	}
 
-	results, err := w.TotalReceivedForAccounts(ctx, int32(*cmd.MinConf))
+	minConf := int32(1)
+	if cmd.MinConf != nil {
+		minConf = int32(*cmd.MinConf)
+	}
+
+	results, err := w.TotalReceivedForAccounts(ctx, minConf)
 	if err != nil {
 		return nil, err
 	}
@@ -3030,7 +3056,10 @@ func (s *Server) listReceivedByAddress(ctx context.Context, icmd interface{}) (i
 		allAddrData[address] = AddrData{}
 	}
 
-	minConf := *cmd.MinConf
+	minConf := int32(1)
+	if cmd.MinConf != nil {
+		minConf = int32(*cmd.MinConf)
+	}
 	var endHeight int32
 	if minConf == 0 {
 		endHeight = -1
@@ -3093,7 +3122,10 @@ func (s *Server) listSinceBlock(ctx context.Context, icmd interface{}) (interfac
 		return nil, errUnloadedWallet
 	}
 
-	targetConf := int32(*cmd.TargetConfirmations)
+	targetConf := int32(1)
+	if cmd.TargetConfirmations != nil {
+		targetConf = int32(*cmd.TargetConfirmations)
+	}
 	if targetConf < 1 {
 		return nil, rpcErrorf(dcrjson.ErrRPCInvalidParameter, "target_confirmations must be positive")
 	}
@@ -3159,7 +3191,16 @@ func (s *Server) listTransactions(ctx context.Context, icmd interface{}) (interf
 				`Use "*" to reference all accounts.`)
 	}
 
-	return w.ListTransactions(ctx, *cmd.From, *cmd.Count)
+	count := 10
+	if cmd.Count != nil {
+		count = *cmd.Count
+	}
+	from := 0
+	if cmd.From != nil {
+		from = *cmd.From
+	}
+
+	return w.ListTransactions(ctx, from, count)
 }
 
 // listAddressTransactions handles a listaddresstransactions request by
@@ -3242,7 +3283,15 @@ func (s *Server) listUnspent(ctx context.Context, icmd interface{}) (interface{}
 	if cmd.Account != nil {
 		account = *cmd.Account
 	}
-	result, err := w.ListUnspent(ctx, int32(*cmd.MinConf), int32(*cmd.MaxConf), addresses, account)
+	minConf := int32(1)
+	if cmd.MinConf != nil {
+		minConf = int32(*cmd.MinConf)
+	}
+	maxConf := int32(9999999)
+	if cmd.MaxConf != nil {
+		maxConf = int32(*cmd.MaxConf)
+	}
+	result, err := w.ListUnspent(ctx, minConf, maxConf, addresses, account)
 	if err != nil {
 		if errors.Is(err, errors.NotExist) {
 			return nil, errAddressNotInWallet
@@ -3846,7 +3895,11 @@ func (s *Server) rescanWallet(ctx context.Context, icmd interface{}) (interface{
 		return nil, errNoNetwork
 	}
 
-	err := w.RescanFromHeight(ctx, n, int32(*cmd.BeginHeight))
+	beginHeight := int32(0)
+	if cmd.BeginHeight != nil {
+		beginHeight = int32(*cmd.BeginHeight)
+	}
+	err := w.RescanFromHeight(ctx, n, beginHeight)
 	return nil, err
 }
 
@@ -3928,7 +3981,11 @@ func (s *Server) ticketInfo(ctx context.Context, icmd interface{}) (interface{},
 
 	res := make([]types.TicketInfoResult, 0)
 
-	start := wallet.NewBlockIdentifierFromHeight(*cmd.StartHeight)
+	startHeight := int32(0)
+	if cmd.StartHeight != nil {
+		startHeight = int32(*cmd.StartHeight)
+	}
+	start := wallet.NewBlockIdentifierFromHeight(startHeight)
 	end := wallet.NewBlockIdentifierFromHeight(-1)
 	tmptx := new(wire.MsgTx)
 	err := w.GetTickets(ctx, func(ts []*wallet.TicketSummary, h *wire.BlockHeader) (bool, error) {
@@ -4053,7 +4110,10 @@ func (s *Server) sendFrom(ctx context.Context, icmd interface{}) (interface{}, e
 	if cmd.Amount < 0 {
 		return nil, rpcErrorf(dcrjson.ErrRPCInvalidParameter, "negative amount")
 	}
-	minConf := int32(*cmd.MinConf)
+	minConf := int32(1)
+	if cmd.MinConf != nil {
+		minConf = int32(*cmd.MinConf)
+	}
 	if minConf < 0 {
 		return nil, rpcErrorf(dcrjson.ErrRPCInvalidParameter, "negative minconf")
 	}
@@ -4093,7 +4153,10 @@ func (s *Server) sendMany(ctx context.Context, icmd interface{}) (interface{}, e
 	}
 
 	// Check that minconf is positive.
-	minConf := int32(*cmd.MinConf)
+	minConf := int32(1)
+	if cmd.MinConf != nil {
+		minConf = int32(*cmd.MinConf)
+	}
 	if minConf < 0 {
 		return nil, rpcErrorf(dcrjson.ErrRPCInvalidParameter, "negative minconf")
 	}
@@ -4171,8 +4234,14 @@ func (s *Server) sendToMultiSig(ctx context.Context, icmd interface{}) (interfac
 	if err != nil {
 		return nil, rpcError(dcrjson.ErrRPCInvalidParameter, err)
 	}
-	nrequired := int8(*cmd.NRequired)
-	minconf := int32(*cmd.MinConf)
+	nrequired := int8(1)
+	if cmd.NRequired != nil {
+		nrequired = int8(*cmd.NRequired)
+	}
+	minConf := int32(1)
+	if cmd.MinConf != nil {
+		minConf = int32(*cmd.MinConf)
+	}
 
 	pubKeys, err := walletPubKeys(ctx, w, cmd.Pubkeys)
 	if err != nil {
@@ -4180,7 +4249,7 @@ func (s *Server) sendToMultiSig(ctx context.Context, icmd interface{}) (interfac
 	}
 
 	tx, addr, script, err :=
-		w.CreateMultisigTx(ctx, account, amount, pubKeys, nrequired, minconf)
+		w.CreateMultisigTx(ctx, account, amount, pubKeys, nrequired, minConf)
 	if err != nil {
 		return nil, err
 	}
@@ -4217,7 +4286,11 @@ func (s *Server) sendRawTransaction(ctx context.Context, icmd interface{}) (inte
 		return nil, rpcError(dcrjson.ErrRPCDeserialization, err)
 	}
 
-	if !*cmd.AllowHighFees {
+	allowHighFees := false
+	if cmd.AllowHighFees != nil {
+		allowHighFees = *cmd.AllowHighFees
+	}
+	if !allowHighFees {
 		highFees, err := txrules.TxPaysHighFees(msgtx)
 		if err != nil {
 			return nil, err
@@ -4390,8 +4463,12 @@ func (s *Server) signRawTransaction(ctx context.Context, icmd interface{}) (inte
 		return nil, rpcError(dcrjson.ErrRPCInvalidParameter, err)
 	}
 
+	flags := "ALL"
+	if cmd.Flags != nil {
+		flags = *cmd.Flags
+	}
 	var hashType txscript.SigHashType
-	switch *cmd.Flags {
+	switch flags {
 	case "ALL":
 		hashType = txscript.SigHashAll
 	case "NONE":
@@ -4474,7 +4551,7 @@ func (s *Server) signRawTransaction(ctx context.Context, icmd interface{}) (inte
 		for i, txIn := range tx.TxIn {
 			// We don't need the first input of a stakebase tx, as it's garbage
 			// anyway.
-			if i == 0 && *cmd.Flags == "ssgen" {
+			if i == 0 && flags == "ssgen" {
 				continue
 			}
 
@@ -4627,7 +4704,11 @@ func (s *Server) signRawTransactions(ctx context.Context, icmd interface{}) (int
 	// do that now. Otherwise, construct the slice and return it.
 	toReturn := make([]types.SignedTransaction, len(cmd.RawTxs))
 
-	if *cmd.Send {
+	send := true
+	if cmd.Send != nil {
+		send = *cmd.Send
+	}
+	if send {
 		n, ok := s.walletLoader.NetworkBackend()
 		if !ok {
 			return nil, errNoNetwork

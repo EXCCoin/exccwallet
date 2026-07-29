@@ -19,12 +19,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/EXCCoin/exccd/chaincfg/v3"
+	"github.com/EXCCoin/exccd/dcrjson/v4"
 	"github.com/EXCCoin/exccwallet/v2/errors"
 	"github.com/EXCCoin/exccwallet/v2/internal/loader"
 	"github.com/EXCCoin/exccwallet/v2/rpc/jsonrpc/types"
-	"github.com/EXCCoin/exccd/chaincfg/v3"
-	"github.com/EXCCoin/exccd/dcrjson/v4"
-	dcrdtypes "github.com/EXCCoin/exccd/rpc/jsonrpc/types/v3"
 	"github.com/gorilla/websocket"
 )
 
@@ -312,13 +311,13 @@ func idPointer(id interface{}) (p *interface{}) {
 func (s *Server) invalidAuth(req *dcrjson.Request) bool {
 	cmd, err := dcrjson.ParseParams(types.Method(req.Method), req.Params)
 	if err != nil {
-		return false
+		return true
 	}
-	authCmd, ok := cmd.(*dcrdtypes.AuthenticateCmd)
+	authCmd, ok := cmd.(*types.AuthenticateCmd)
 	if !ok {
-		return false
+		return true
 	}
-	// Authenticate commands are invalid when no basic auth is used
+	// Authenticate commands are invalid when no basic auth is used.
 	if s.authsha == nil {
 		return true
 	}
