@@ -797,6 +797,8 @@ func (w *Wallet) compressWalletInternal(ctx context.Context, op errors.Op, dbtx 
 		PkScript: pkScript,
 		Version:  vers,
 	})
+	// Mainnet further restricts protocol-valid transaction sizes through
+	// standardness rules.
 	maximumTxSize := w.chainParams.MaxTxSize
 	if w.chainParams.Net == wire.MainNet {
 		maximumTxSize = maxStandardTxSize
@@ -805,31 +807,37 @@ func (w *Wallet) compressWalletInternal(ctx context.Context, op errors.Op, dbtx 
 	// Add the txins using all the eligible outputs.
 	totalAdded := dcrutil.Amount(0)
 	scriptSizes := make([]int, 0, maxNumIns)
+	var szEst int
 	forSigning := make([]Input, 0, maxNumIns)
 	count := 0
 	for _, e := range eligible {
 		if count >= maxNumIns {
 			break
 		}
-		// Add the size of a wire.OutPoint
-		if msgtx.SerializeSize() > maximumTxSize {
+		scriptSizes = append(scriptSizes, txsizes.RedeemP2PKHSigScriptSize)
+		newSzEst := txsizes.EstimateSerializeSize(scriptSizes, msgtx.TxOut, 0)
+		if newSzEst > maximumTxSize {
+			scriptSizes = scriptSizes[:len(scriptSizes)-1]
 			break
 		}
+		szEst = newSzEst
 
 		txIn := wire.NewTxIn(&e.OutPoint, e.PrevOut.Value, nil)
 		msgtx.AddTxIn(txIn)
 		totalAdded += dcrutil.Amount(e.PrevOut.Value)
 		forSigning = append(forSigning, e)
-		scriptSizes = append(scriptSizes, txsizes.RedeemP2PKHSigScriptSize)
 		count++
 	}
 
 	// Get an initial fee estimate based on the number of selected inputs
 	// and added outputs, with no change.
-	szEst := txsizes.EstimateSerializeSize(scriptSizes, msgtx.TxOut, 0)
-	feeEst := txrules.FeeForSerializeSize(w.RelayFee(), szEst)
+	feeRate := w.RelayFee()
+	feeEst := txrules.FeeForSerializeSize(feeRate, szEst)
 
 	msgtx.TxOut[0].Value = int64(totalAdded - feeEst)
+	if txrules.IsDustOutput(msgtx.TxOut[0], feeRate) {
+		return nil, errors.E(op, errors.InsufficientBalance)
+	}
 
 	err = w.signP2PKHMsgTx(msgtx, forSigning, addrmgrNs)
 	if err != nil {
