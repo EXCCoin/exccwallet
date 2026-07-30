@@ -64,7 +64,8 @@ func (tg *tg) createBlockOne(name string) *gblock {
 		tg.Fatal(err)
 	}
 	h := blockOne.BlockHash()
-	n := &BlockNode{Header: &blockOne.Header, Hash: &h, FilterV2: f}
+	n := &BlockNode{Header: &blockOne.Header, Hash: &h, FilterV2: f,
+		RelevantTxs: []*wire.MsgTx{}}
 	return &gblock{blockOne, n}
 }
 
@@ -75,7 +76,8 @@ func (tg *tg) nextBlock(blockName string, spend *chaingen.SpendableOut, ticketSp
 		tg.Fatal(err)
 	}
 	h := b.BlockHash()
-	n := &BlockNode{Header: &b.Header, Hash: &h, FilterV2: f}
+	n := &BlockNode{Header: &b.Header, Hash: &h, FilterV2: f,
+		RelevantTxs: []*wire.MsgTx{}}
 	return &gblock{b, n}
 }
 
@@ -195,6 +197,13 @@ func TestReorg(t *testing.T) {
 		t.Fatalf("Did not prune blocks 2a-3a from forest")
 	}
 	tw.assertNoBetterChain(forest)
+	var originalExtension []*BlockNode
+	for i := 4; i <= 5; i++ {
+		name := fmt.Sprintf("%va", i)
+		b := tg.nextBlock(name, nil, nil)
+		originalExtension = append(originalExtension, b.BlockNode)
+	}
+	b5aHash := tg.blockHashByName("5a")
 
 	// Generate sidechain blocks 2b-3b and assert it does not create a better
 	// chain.
@@ -236,4 +245,19 @@ func TestReorg(t *testing.T) {
 	tw.expectBlockInMainChain(b2bHash, true, false)
 	tw.expectBlockInMainChain(b3bHash, true, false)
 	tw.expectBlockInMainChain(b4bHash, true, false)
+
+	// Extend the original branch and switch back to it.  The rolled-back
+	// blocks contain no wallet transactions, but are still fully processed.
+	for _, n := range originalExtension {
+		mustAddBlockNode(t, forest, n)
+	}
+	bestChain = tw.evaluateBestChain(forest, 4, b5aHash)
+	tw.chainSwitch(forest, bestChain)
+	rescanPoint, err := w.RescanPoint(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rescanPoint != nil {
+		t.Fatalf("processed transaction marker did not reach tip; rescan starts at %v", rescanPoint)
+	}
 }

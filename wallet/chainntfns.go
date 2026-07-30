@@ -159,6 +159,9 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest,
 			}
 			for _, n := range prevChain {
 				n.RelevantTxs = removedTxs[*n.Hash]
+				if n.RelevantTxs == nil {
+					n.RelevantTxs = []*wire.MsgTx{}
+				}
 			}
 		}
 
