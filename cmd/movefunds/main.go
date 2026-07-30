@@ -21,16 +21,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 
-	"github.com/EXCCoin/exccwallet/v2/rpc/jsonrpc/types"
-	"github.com/EXCCoin/exccwallet/v2/wallet/txauthor"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
-	"github.com/EXCCoin/exccd/txscript/v4"
+	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/rpc/jsonrpc/types"
+	"github.com/EXCCoin/exccwallet/v2/wallet/txauthor"
 )
 
 // params is the global representing the chain parameters. It is assigned
@@ -167,7 +166,7 @@ func main() {
 		return
 	}
 
-	addr, err := dcrutil.DecodeAddress(cfg.SendToAddress, params)
+	addr, err := stdaddr.DecodeAddress(cfg.SendToAddress, params)
 	if err != nil {
 		fmt.Printf("failed to parse address %s: %v", cfg.SendToAddress, err)
 		return
@@ -180,13 +179,10 @@ func main() {
 	}
 
 	// Create the unsigned transaction.
-	pkScript, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		fmt.Printf("failed to generate pkScript: %s", err)
-		return
-	}
-
-	txOuts := []*wire.TxOut{wire.NewTxOut(int64(targetAmount-fee), pkScript)}
+	scriptVersion, pkScript := addr.PaymentScript()
+	txOut := wire.NewTxOut(int64(targetAmount-fee), pkScript)
+	txOut.Version = scriptVersion
+	txOuts := []*wire.TxOut{txOut}
 	atx, err := txauthor.NewUnsignedTransaction(txOuts, fee, inputSource, nil, params.MaxTxSize)
 	if err != nil {
 		fmt.Printf("failed to create unsigned transaction: %s", err)

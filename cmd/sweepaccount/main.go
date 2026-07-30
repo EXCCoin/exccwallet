@@ -11,25 +11,22 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
 
-	"github.com/EXCCoin/exccwallet/v2/rpc/jsonrpc/types"
-	"github.com/EXCCoin/exccwallet/v2/wallet/txauthor"
-	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
-	"github.com/EXCCoin/exccd/txscript/v4"
+	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/rpc/jsonrpc/types"
+	"github.com/EXCCoin/exccwallet/v2/wallet/txauthor"
+	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
 	"github.com/jessevdk/go-flags"
 	"github.com/jrick/wsrpc/v2"
 	"golang.org/x/crypto/ssh/terminal"
 )
-
-const defaultScriptVersion = 0
 
 var (
 	activeNet           = chaincfg.MainNetParams()
@@ -256,17 +253,12 @@ func (src *destinationScriptSourceToAccount) Script() ([]byte, uint16, error) {
 		return nil, 0, err
 	}
 
-	destinationAddress, err := dcrutil.DecodeAddress(destinationAddressStr, activeNet)
+	destinationAddress, err := stdaddr.DecodeAddress(destinationAddressStr, activeNet)
 	if err != nil {
 		return nil, 0, err
 	}
-
-	script, err := txscript.PayToAddrScript(destinationAddress)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return script, defaultScriptVersion, nil
+	version, script := destinationAddress.PaymentScript()
+	return script, version, nil
 }
 
 func (src *destinationScriptSourceToAccount) ScriptSize() int {
@@ -281,12 +273,12 @@ type destinationScriptSourceToAddress struct {
 
 // Source creates a non-change address.
 func (src *destinationScriptSourceToAddress) Script() ([]byte, uint16, error) {
-	destinationAddress, err := dcrutil.DecodeAddress(src.address, activeNet)
+	destinationAddress, err := stdaddr.DecodeAddress(src.address, activeNet)
 	if err != nil {
 		return nil, 0, err
 	}
-	script, err := txscript.PayToAddrScript(destinationAddress)
-	return script, defaultScriptVersion, err
+	version, script := destinationAddress.PaymentScript()
+	return script, version, nil
 }
 
 func (src *destinationScriptSourceToAddress) ScriptSize() int {
