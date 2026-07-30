@@ -7,11 +7,11 @@ package deployments
 import (
 	"context"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/rpc/client/dcrd"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
 	dcrdtypes "github.com/EXCCoin/exccd/rpc/jsonrpc/types/v3"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/rpc/client/dcrd"
 )
 
 // HardcodedDeployment specifies hardcoded block heights that a deployment
@@ -80,7 +80,7 @@ const (
 
 // DCP0010Active returns whether the consensus rules for the next block with the
 // current chain tip height requires the subsidy split as specified in DCP0010.
-// DCP0010 is always active on simnet, and requires the RPC syncer to detect
+// DCP0010 is inactive on EXCC simnet, and requires the RPC syncer to detect
 // activation on mainnet and testnet3.
 func DCP0010Active(ctx context.Context, height int32, params *chaincfg.Params,
 	syncer interface{}) (bool, error) {
@@ -89,7 +89,7 @@ func DCP0010Active(ctx context.Context, height int32, params *chaincfg.Params,
 	rcai := int32(params.RuleChangeActivationInterval)
 
 	if net == wire.SimNet {
-		return true, nil
+		return false, nil
 	}
 	if net != wire.MainNet && net != wire.TestNet3 {
 		return false, nil
