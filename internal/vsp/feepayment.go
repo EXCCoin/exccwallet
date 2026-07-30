@@ -10,12 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/internal/uniformprng"
-	"github.com/EXCCoin/exccwallet/v2/rpc/client/dcrd"
-	"github.com/EXCCoin/exccwallet/v2/wallet"
-	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
-	"github.com/EXCCoin/exccwallet/v2/wallet/txsizes"
 	"github.com/EXCCoin/exccd/blockchain/stake/v4"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
@@ -24,6 +18,12 @@ import (
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 	"github.com/EXCCoin/exccd/txscript/v4/stdscript"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/internal/uniformprng"
+	"github.com/EXCCoin/exccwallet/v2/rpc/client/dcrd"
+	"github.com/EXCCoin/exccwallet/v2/wallet"
+	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
+	"github.com/EXCCoin/exccwallet/v2/wallet/txsizes"
 )
 
 var prng lockedRand
@@ -580,7 +580,7 @@ func (fp *feePayment) makeFeeTx(tx *wire.MsgTx) error {
 		if err != nil {
 			return err
 		}
-		return fmt.Errorf(sigErrStr)
+		return errors.New(sigErrStr)
 	}
 
 	err = w.SetPublished(ctx, &feeHash, false)
