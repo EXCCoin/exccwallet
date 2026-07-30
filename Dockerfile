@@ -1,13 +1,16 @@
-FROM golang:1.19-alpine as builder
+FROM golang:1.26-alpine3.23 AS builder
 RUN apk add git ca-certificates upx gcc build-base --update --no-cache
 
 WORKDIR /go/src/github.com/EXCCoin/exccwallet
 COPY . .
 
 ENV GO111MODULE=on
-RUN go build -ldflags='-s -w -X main.appBuild=alpine:3.17 -extldflags "-static"' .
+ARG BUILD_PRERELEASE=pre
+ARG BUILD_METADATA=docker
+RUN go build -buildvcs=false -trimpath \
+    -ldflags="-s -w -X github.com/EXCCoin/exccwallet/v2/version.PreRelease=${BUILD_PRERELEASE} -X github.com/EXCCoin/exccwallet/v2/version.BuildMetadata=${BUILD_METADATA} -extldflags '-static'" .
 
-FROM alpine:3.17
+FROM alpine:3.23
 
 WORKDIR /app
 COPY --from=builder /go/src/github.com/EXCCoin/exccwallet/exccwallet .

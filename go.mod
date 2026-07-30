@@ -1,6 +1,6 @@
 module github.com/EXCCoin/exccwallet/v2
 
-go 1.19
+go 1.25.0
 
 require (
 	github.com/EXCCoin/cspp/v2 v2.0.0-20230414143846-6df3d38b9eca
@@ -26,18 +26,18 @@ require (
 	github.com/EXCCoin/exccd/wire v0.0.0-20231114094815-cf10ea2807e7
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
-	github.com/golang/protobuf v1.5.3
+	github.com/golang/protobuf v1.5.4
 	github.com/gorilla/websocket v1.5.1
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/jrick/bitset v1.0.0
 	github.com/jrick/logrotate v1.0.0
 	github.com/jrick/wsrpc/v2 v2.3.5
 	go.etcd.io/bbolt v1.3.8
-	golang.org/x/crypto v0.15.0
-	golang.org/x/sync v0.5.0
-	golang.org/x/text v0.14.0
-	google.golang.org/grpc v1.59.0
-	google.golang.org/protobuf v1.31.0
+	golang.org/x/crypto v0.53.0
+	golang.org/x/sync v0.21.0
+	golang.org/x/text v0.39.0
+	google.golang.org/grpc v1.82.1
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
@@ -49,9 +49,8 @@ require (
 	github.com/companyzero/sntrup4591761 v0.0.0-20220309191932-9e0f3af2f07a // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
 	github.com/mattn/go-pointer v0.0.1 // indirect
-	golang.org/x/net v0.18.0 // indirect
-	golang.org/x/sys v0.14.0 // indirect
-	golang.org/x/term v0.14.0 // indirect
-	google.golang.org/genproto v0.0.0-20231030173426-d783a09b4405 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17 // indirect
+	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/term v0.44.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 )

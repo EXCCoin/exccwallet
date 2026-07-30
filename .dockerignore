@@ -1,0 +1,6 @@
+.git
+*~
+Dockerfile*
+exccwallet-local
+go.work
+go.work.sum
