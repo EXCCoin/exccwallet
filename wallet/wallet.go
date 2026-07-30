@@ -249,13 +249,13 @@ func (w *Wallet) AddTSpend(tx wire.MsgTx) error {
 func voteVersion(params *chaincfg.Params) uint32 {
 	switch params.Net {
 	case wire.MainNet:
-		return 9
+		return 11
 	case 0x48e7a065: // TestNet2
 		return 6
 	case wire.TestNet3:
-		return 10
+		return 11
 	case wire.SimNet:
-		return 10
+		return 11
 	default:
 		return 1
 	}

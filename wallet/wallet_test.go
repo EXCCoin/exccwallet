@@ -9,10 +9,27 @@ import (
 	"math"
 	"testing"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
+	"github.com/EXCCoin/exccwallet/v2/errors"
 )
+
+func TestCurrentAgendas(t *testing.T) {
+	version, agendas := CurrentAgendas(chaincfg.MainNetParams())
+	if version != 11 {
+		t.Fatalf("vote version = %d, want 11", version)
+	}
+	want := map[string]bool{
+		chaincfg.VoteIDEquihashValidation:   true,
+		chaincfg.VoteIDFixTxInputValidation: true,
+	}
+	for _, agenda := range agendas {
+		delete(want, agenda.Vote.Id)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing current agendas: %v", want)
+	}
+}
 
 func TestTicketPriceSpendLimit(t *testing.T) {
 	t.Parallel()
