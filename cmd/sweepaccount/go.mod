@@ -8,7 +8,7 @@ require (
 	github.com/EXCCoin/exccd/dcrutil/v4 v4.0.0-20260730143812-d2b4b2c5d047
 	github.com/EXCCoin/exccd/txscript/v4 v4.0.0-20260730143812-d2b4b2c5d047
 	github.com/EXCCoin/exccd/wire v0.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccwallet/v2 v2.7.5
+	github.com/EXCCoin/exccwallet/v2 v2.7.6-0.20260730144047-c1fbec74bd4e
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/jrick/wsrpc/v2 v2.3.5
 	golang.org/x/crypto v0.53.0
