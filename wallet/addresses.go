@@ -517,22 +517,11 @@ func (w *Wallet) nextAddress(ctx context.Context, op errors.Op,
 	if updates == nil && maybeDBTX == nil {
 		pending := make(accountBranchChildUpdates, 0, 1)
 		updates = &pending
-		dbtx, err := w.db.BeginReadWriteTx()
-		if err != nil {
-			return nil, errors.E(op, err)
-		}
 		defer func() {
 			if rerr != nil {
-				dbtx.Rollback()
 				return
 			}
-			err := updates.UpdateDB(ctx, w, dbtx)
-			if err != nil {
-				rerr = err
-				dbtx.Rollback()
-				return
-			}
-			rerr = dbtx.Commit()
+			rerr = updates.UpdateDB(ctx, w, nil)
 		}()
 	}
 

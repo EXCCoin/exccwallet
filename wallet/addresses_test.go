@@ -17,6 +17,7 @@ import (
 	"github.com/EXCCoin/exccd/chaincfg/v3"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
+	"github.com/EXCCoin/exccd/wire"
 )
 
 // expectedAddr is used to house the expected return values from a managed
@@ -222,6 +223,46 @@ func TestNextAddressRollsBackOnError(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("nextAddress left a write transaction open")
+	}
+}
+
+type writeCheckingNetwork struct {
+	mockNetwork
+	db walletdb.DB
+}
+
+func (n writeCheckingNetwork) LoadTxFilter(context.Context, bool,
+	[]stdaddr.Address, []wire.OutPoint) error {
+
+	done := make(chan error, 1)
+	go func() {
+		tx, err := n.db.BeginReadWriteTx()
+		if err == nil {
+			err = tx.Rollback()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(time.Second):
+		return context.DeadlineExceeded
+	}
+}
+
+func TestNextAddressDoesNotHoldWriteTxDuringNetworkCall(t *testing.T) {
+	w, db, teardown := setupWallet(t, &walletConfig)
+	defer teardown()
+	w.SetNetworkBackend(writeCheckingNetwork{db: db})
+
+	w.addressBuffersMu.Lock()
+	w.addressBuffers[defaultAccount].albExternal.cursor = w.gapLimit
+	w.addressBuffersMu.Unlock()
+
+	_, err := w.NewExternalAddress(context.Background(), defaultAccount,
+		WithGapPolicyIgnore())
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
