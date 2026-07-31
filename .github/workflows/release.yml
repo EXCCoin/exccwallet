@@ -146,10 +146,13 @@ jobs:
           mkdir -p "dist/${ASSET_NAME}"
           # Major/Minor/Patch are consts in version/version.go and cannot be
           # set by ldflags.  The following step enforces source/tag agreement.
-          go build -buildvcs=false -trimpath \
-            -ldflags "-s -w \
-              -X github.com/EXCCoin/exccwallet/v2/version.PreRelease= \
-              -X github.com/EXCCoin/exccwallet/v2/version.BuildMetadata=release" \
+          LDFLAGS="-s -w \
+            -X github.com/EXCCoin/exccwallet/v2/version.PreRelease= \
+            -X github.com/EXCCoin/exccwallet/v2/version.BuildMetadata=release"
+          if [ "${GOOS}" = windows ]; then
+            LDFLAGS="${LDFLAGS} -linkmode=external -extldflags=-static"
+          fi
+          go build -buildvcs=false -trimpath -ldflags "${LDFLAGS}" \
             -o "${BINARY}" .
 
       - name: Verify version/version.go matches the tag
@@ -163,9 +166,30 @@ jobs:
             *) echo "::error::binary reports '${reported}', tag is '${VERSION}' -- bump Major/Minor/Patch in version/version.go"; exit 1 ;;
           esac
 
+      - name: Refuse dynamic compiler runtimes
+        if: matrix.goos == 'windows'
+        shell: bash
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -eu
+          OBJDUMP=objdump
+          if [ "${GOARCH}" = arm64 ]; then
+            OBJDUMP=llvm-objdump
+          fi
+          IMPORTS=$("${OBJDUMP}" -p "${BINARY}" | sed -n 's/.*DLL Name: //p')
+          printf '%s\n' "${IMPORTS}"
+          if printf '%s\n' "${IMPORTS}" | grep -Eiq \
+            '^(libgcc|libstdc\+\+|libwinpthread|libc\+\+|libunwind).*\.dll$'; then
+            echo '::error::Windows binary depends on a compiler runtime DLL.'
+            exit 1
+          fi
+
       - name: Add build information
         shell: bash
         env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
@@ -176,8 +200,8 @@ jobs:
             echo "Commit: ${GITHUB_SHA}"
             echo "Target: ${GOOS}/${GOARCH}"
             echo "Go: $(go version)"
-            echo "CC: $(go env CC)"
-            echo "CXX: $(go env CXX)"
+            echo "CC: ${CC}"
+            echo "CXX: ${CXX}"
             echo
             go version -m "${BINARY}"
           } > "dist/${ASSET_NAME}/BUILDINFO.txt"
