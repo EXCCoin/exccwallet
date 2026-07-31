@@ -13,14 +13,14 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/EXCCoin/exccwallet/v2/deployments"
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 	blockchain "github.com/EXCCoin/exccd/blockchain/standalone/v2"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/deployments"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 )
 
 func (w *Wallet) isTestNet3() bool {
@@ -567,7 +567,8 @@ func (w *Wallet) validateHeaderChainDifficulties(dbtx walletdb.ReadTx, chain []*
 				hash, h.Bits, bits)
 			return chain[idx:], errors.E(op, errors.Consensus, err)
 		}
-		err = blockchain.CheckProofOfWork(h, h.Bits, w.chainParams)
+		// Strict Equihash validation is vote-activated, not positional.
+		err = blockchain.CheckProofOfWorkHash(h, h.Bits, w.chainParams)
 		if err != nil {
 			return chain[idx:], errors.E(op, errors.Consensus, err)
 		}
