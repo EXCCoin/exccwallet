@@ -11,16 +11,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/lru"
-	"github.com/EXCCoin/exccwallet/v2/p2p"
-	"github.com/EXCCoin/exccwallet/v2/validate"
-	"github.com/EXCCoin/exccwallet/v2/wallet"
 	"github.com/EXCCoin/exccd/addrmgr/v2"
 	"github.com/EXCCoin/exccd/blockchain/stake/v4"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/gcs/v3/blockcf2"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/lru"
+	"github.com/EXCCoin/exccwallet/v2/p2p"
+	"github.com/EXCCoin/exccwallet/v2/validate"
+	"github.com/EXCCoin/exccwallet/v2/wallet"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -206,6 +206,9 @@ func (s *Syncer) peerConnected(remotesCount int, addr string) {
 func (s *Syncer) peerDisconnected(remotesCount int, addr string) {
 	if s.notifications != nil && s.notifications.PeerDisconnected != nil {
 		s.notifications.PeerDisconnected(int32(remotesCount), addr)
+	}
+	if remotesCount == 0 {
+		s.unsynced()
 	}
 }
 
@@ -658,49 +661,43 @@ func (s *Syncer) receiveInv(ctx context.Context) error {
 			return err
 		}
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		var blocks []*chainhash.Hash
+		var txs []*chainhash.Hash
+		for _, inv := range msg.InvList {
+			switch inv.Type {
+			case wire.InvTypeBlock:
+				blocks = append(blocks, &inv.Hash)
+			case wire.InvTypeTx:
+				txs = append(txs, &inv.Hash)
+			}
+		}
 
-			var blocks []*chainhash.Hash
-			var txs []*chainhash.Hash
+		if len(blocks) != 0 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 
-			for _, inv := range msg.InvList {
-				switch inv.Type {
-				case wire.InvTypeBlock:
-					blocks = append(blocks, &inv.Hash)
-				case wire.InvTypeTx:
-					txs = append(txs, &inv.Hash)
+				err := s.handleBlockInvs(ctx, rp, blocks)
+				if ctx.Err() != nil {
+					return
 				}
-			}
-
-			if len(blocks) != 0 {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-
-					err := s.handleBlockInvs(ctx, rp, blocks)
-					if ctx.Err() != nil {
-						return
-					}
-					if errors.Is(err, errors.Protocol) || errors.Is(err, errors.Consensus) {
-						log.Warnf("Disconnecting peer %v: %v", rp, err)
-						rp.Disconnect(err)
-						return
-					}
-					if err != nil {
-						log.Warnf("Failed to handle blocks inventoried by %v: %v", rp, err)
-					}
-				}()
-			}
-			if len(txs) != 0 {
-				wg.Add(1)
-				go func() {
-					s.handleTxInvs(ctx, rp, txs)
-					wg.Done()
-				}()
-			}
-		}()
+				if errors.Is(err, errors.Protocol) || errors.Is(err, errors.Consensus) {
+					log.Warnf("Disconnecting peer %v: %v", rp, err)
+					rp.Disconnect(err)
+					return
+				}
+				if err != nil {
+					log.Warnf("Failed to handle blocks inventoried by %v: %v", rp, err)
+				}
+			}()
+		}
+		if len(txs) != 0 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.handleTxInvs(ctx, rp, txs)
+			}()
+		}
 	}
 }
 
