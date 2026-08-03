@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"testing"
 
+	blockchain "github.com/EXCCoin/exccd/blockchain/standalone/v2"
 	"github.com/EXCCoin/exccd/blockchain/v4/chaingen"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
@@ -138,6 +139,39 @@ func (tw *tw) expectBlockInMainChain(hash *chainhash.Hash, have, invalidated boo
 	}
 	if isInvalidated != invalidated {
 		tw.Fatalf("Expected block %v invalidated: %v, actually invalidated: %v", hash, invalidated, isInvalidated)
+	}
+}
+
+func TestStakeInfoIncludesHeaderPoolSize(t *testing.T) {
+	t.Parallel()
+
+	cfg := basicWalletConfig
+	w, teardown := testWallet(t, &cfg)
+	defer teardown()
+
+	tg := maketg(t, cfg.Params)
+	blockOne := tg.createBlockOne("block-one")
+	const poolSize = 123
+	blockOne.MsgBlock.Header.PoolSize = poolSize
+	for blockchain.CheckProofOfWorkHash(&blockOne.MsgBlock.Header,
+		blockOne.MsgBlock.Header.Bits, cfg.Params) != nil {
+
+		blockOne.MsgBlock.Header.Nonce++
+	}
+	hash := blockOne.MsgBlock.BlockHash()
+	blockOne.BlockNode.Hash = &hash
+
+	forest := new(SidechainForest)
+	mustAddBlockNode(t, forest, blockOne.BlockNode)
+	tw := &tw{t, w}
+	tw.chainSwitch(forest, tw.evaluateBestChain(forest, 1, &hash))
+
+	info, err := w.StakeInfo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.PoolSize != poolSize {
+		t.Fatalf("pool size = %d, want %d", info.PoolSize, poolSize)
 	}
 }
 

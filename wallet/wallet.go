@@ -1653,14 +1653,10 @@ func (w *Wallet) PurchaseTickets(ctx context.Context, n NetworkBackend,
 		return nil, err
 	}
 	_, height := w.MainChainTip(ctx)
-	dcp0010Active := true
-	switch n := n.(type) {
-	case *dcrd.RPC:
-		dcp0010Active, err = deployments.DCP0010Active(ctx,
-			height, w.chainParams, n)
-		if err != nil {
-			return nil, err
-		}
+	dcp0010Active, err := deployments.DCP0010Active(ctx,
+		height, w.chainParams, n)
+	if err != nil {
+		return nil, err
 	}
 	relayFee := w.RelayFee()
 	vspFee := txrules.StakePoolTicketFee(sdiff, relayFee, height,
@@ -4052,11 +4048,12 @@ func (w *Wallet) StakeInfo(ctx context.Context) (*StakeInfoData, error) {
 		txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
 		tipHash, tipHeight := w.txStore.MainChainTip(dbtx)
 		res.BlockHeight = int64(tipHeight)
+		tipHeader, err := w.txStore.GetBlockHeader(dbtx, &tipHash)
+		if err != nil {
+			return err
+		}
+		res.PoolSize = tipHeader.PoolSize
 		if deployments.DCP0001.Active(tipHeight, w.chainParams.Net) {
-			tipHeader, err := w.txStore.GetBlockHeader(dbtx, &tipHash)
-			if err != nil {
-				return err
-			}
 			sdiff, err := w.nextRequiredDCP0001PoSDifficulty(dbtx, tipHeader, nil)
 			if err != nil {
 				return err

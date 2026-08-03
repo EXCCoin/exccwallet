@@ -16,14 +16,6 @@ import (
 
 	"github.com/EXCCoin/cspp/v2"
 	"github.com/EXCCoin/cspp/v2/coinjoin"
-	"github.com/EXCCoin/exccwallet/v2/deployments"
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/rpc/client/dcrd"
-	"github.com/EXCCoin/exccwallet/v2/wallet/txauthor"
-	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
-	"github.com/EXCCoin/exccwallet/v2/wallet/txsizes"
-	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
-	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 	"github.com/EXCCoin/exccd/blockchain/stake/v4"
 	blockchain "github.com/EXCCoin/exccd/blockchain/standalone/v2"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
@@ -35,6 +27,13 @@ import (
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 	"github.com/EXCCoin/exccd/txscript/v4/stdscript"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/deployments"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/wallet/txauthor"
+	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
+	"github.com/EXCCoin/exccwallet/v2/wallet/txsizes"
+	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 )
 
 // --------------------------------------------------------------------------------
@@ -1410,18 +1409,10 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 		if err != nil {
 			return nil, err
 		}
-		// In SPV mode, DCP0010 is assumed to have activated.  This
-		// results in a larger fee calculation for the purposes of UTXO
-		// selection.  In RPC mode the actual activation can be
-		// determined.
-		dcp0010Active := true
-		switch n := n.(type) {
-		case *dcrd.RPC:
-			dcp0010Active, err = deployments.DCP0010Active(ctx,
-				int32(tipHeight), w.chainParams, n)
-			if err != nil {
-				return nil, err
-			}
+		dcp0010Active, err := deployments.DCP0010Active(ctx,
+			int32(tipHeight), w.chainParams, n)
+		if err != nil {
+			return nil, err
 		}
 		fee := txrules.StakePoolTicketFee(ticketPrice, ticketFee,
 			int32(tipHeight), feePrice, w.chainParams,

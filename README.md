@@ -24,11 +24,12 @@ does mean they could track all transactions involving your addresses
 and therefore know your exact balance.  In a future release, public data
 encryption will extend to transactions as well.
 
-exccwallet is not an SPV client and requires connecting to a local or
-remote exccd instance for asynchronous blockchain queries and
-notifications over websockets.  Full exccd installation instructions
-can be found [here](https://github.com/EXCCoin/exccd).  An alternative
-SPV mode that is compatible with exccd is planned for a future release.
+exccwallet can synchronize directly with network peers in SPV mode using
+compact filters, or through a local or remote exccd instance.  Normal wallet
+operations and VSP staking are supported in both modes.  Wallet-owned Solo
+voting requires exccd so the wallet can receive winning-ticket notifications.
+Full exccd installation instructions can be found
+[here](https://github.com/EXCCoin/exccd).
 
 Wallet clients can use one of two RPC servers:
 

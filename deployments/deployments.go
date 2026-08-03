@@ -8,10 +8,7 @@ import (
 	"context"
 
 	"github.com/EXCCoin/exccd/chaincfg/v3"
-	dcrdtypes "github.com/EXCCoin/exccd/rpc/jsonrpc/types/v3"
 	"github.com/EXCCoin/exccd/wire"
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/rpc/client/dcrd"
 )
 
 // HardcodedDeployment specifies hardcoded block heights that a deployment
@@ -73,46 +70,9 @@ func (d *HardcodedDeployment) Active(height int32, net wire.CurrencyNet) bool {
 	return activationHeight >= 0 && height >= activationHeight
 }
 
-const (
-	lockedinStatus = "lockedin"
-	activeStatus   = "active"
-)
-
-// DCP0010Active returns whether the consensus rules for the next block with the
-// current chain tip height requires the subsidy split as specified in DCP0010.
-// DCP0010 is inactive on EXCC simnet, and requires the RPC syncer to detect
-// activation on mainnet and testnet3.
-func DCP0010Active(ctx context.Context, height int32, params *chaincfg.Params,
-	syncer interface{}) (bool, error) {
-
-	net := params.Net
-	rcai := int32(params.RuleChangeActivationInterval)
-
-	if net == wire.SimNet {
-		return false, nil
-	}
-	if net != wire.MainNet && net != wire.TestNet3 {
-		return false, nil
-	}
-	rpc, ok := syncer.(*dcrd.RPC)
-	if !ok {
-		return false, errors.E(errors.Bug, "DCP0010 activation check requires RPC syncer")
-	}
-	var resp dcrdtypes.GetBlockChainInfoResult
-	err := rpc.Call(ctx, "getblockchaininfo", &resp)
-	if err != nil {
-		return false, err
-	}
-	d, ok := resp.Deployments[chaincfg.VoteIDChangeSubsidySplit]
-	if !ok {
-		return false, nil
-	}
-	switch {
-	case d.Status == lockedinStatus && height == int32(d.Since)+rcai-1:
-		return true, nil
-	case d.Status == activeStatus:
-		return true, nil
-	default:
-		return false, nil
-	}
+// DCP0010Active returns whether EXCC uses the DCP0010 subsidy split.  exccd
+// never activates this inherited Decred agenda on any EXCC network, so the
+// answer is backend-independent and must remain the same for RPC and SPV.
+func DCP0010Active(context.Context, int32, *chaincfg.Params, interface{}) (bool, error) {
+	return false, nil
 }
