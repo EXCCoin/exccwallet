@@ -8,7 +8,7 @@ require (
 	github.com/EXCCoin/exccd/dcrutil/v4 v4.0.1-0.20260804201134-29c256501d37
 	github.com/EXCCoin/exccd/txscript/v4 v4.0.1-0.20260804201134-29c256501d37
 	github.com/EXCCoin/exccd/wire v1.5.1-0.20260804201134-29c256501d37
-	github.com/EXCCoin/exccwallet/v2 v2.7.6-0.20260730144047-c1fbec74bd4e
+	github.com/EXCCoin/exccwallet/v2 v2.8.3-0.20260804201621-3b3e9867c111
 )
 
 require (
