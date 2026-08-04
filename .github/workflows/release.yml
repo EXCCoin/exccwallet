@@ -266,39 +266,15 @@ jobs:
           $(cat SHA256SUMS)
           \`\`\`
           EOF
-          if [ "${GITHUB_REF_NAME}" = v2.8.1 ]; then
-            cat >> MANIFEST.md <<'CORRECTION'
+          if [ "${GITHUB_REF_NAME}" = v2.8.2 ]; then
+            cat >> MANIFEST.md <<'NOTES'
 
-          ## Corrected v2.8.1 release
+          ## Changes since v2.8.1
 
-          These archives replace the original v2.8.1 binaries published from
-          commit `0169433fa6856c9b8aeb3d04b0a34b06cb1f317c`. The tag and semantic
-          version intentionally remain v2.8.1. The corrected source clears
-          ticket purchase passphrases, binds VSP policies per request, and
-          restores unmined spend filters after restart.
-
-          Moving the lightweight `v2.8.1` tag changes GitHub's generated source
-          archives to the corrected commit. The original archive hashes are
-          retained below for provenance.
-
-          ## Original artifact set
-
-          | | |
-          |---|---|
-          | Commit | `0169433fa6856c9b8aeb3d04b0a34b06cb1f317c` |
-          | Built by | `EXCCoin/exccwallet` run [30840945047](https://github.com/EXCCoin/exccwallet/actions/runs/30840945047) |
-
-          Original archive checksums:
-
-          ```
-          45e9f1a02c1da06d129b117c0681e6f60a7c9fb1abdaea6c37bcf7360a68a9a1  exccwallet-v2.8.1-darwin-amd64.tar.gz
-          c4af209e8523313edf0d40fdd119005c03ac862f93631697069a48fc80103241  exccwallet-v2.8.1-darwin-arm64.tar.gz
-          758ee4654c64854b3806f21815c9f4db7e0dab2d10165f19e6ca7275bf051e63  exccwallet-v2.8.1-linux-amd64.tar.gz
-          58c7b170153486d5dfad280d59cbdc955b8412dc509ef28e54d5832f9dfad755  exccwallet-v2.8.1-linux-arm64.tar.gz
-          f3afc8b22a8b90a358dd2ff2f0a834b12a33c07f14d8fdfe67a02016bbf61ccf  exccwallet-v2.8.1-windows-amd64.zip
-          d78355f8664f5533f3f7e42cd3c577df2534e76553c6978d31445ef38951b838  exccwallet-v2.8.1-windows-arm64.zip
-          ```
-          CORRECTION
+          - Clear ticket purchase passphrases after use.
+          - Bind VSP ticket policies to each request.
+          - Restore unmined spend filters after wallet restart.
+          NOTES
           fi
 
       - name: Publish
@@ -325,6 +301,27 @@ jobs:
             echo "::error::expected six archives and two metadata files, found ${#archives[@]} archives and ${#files[@]} total files."
             exit 1
           fi
+
+          if gh release view "${GITHUB_REF_NAME}" --json isDraft >/dev/null 2>&1; then
+            echo "::error::a release already exists for ${GITHUB_REF_NAME}."
+            exit 1
+          fi
+
+          draft_may_exist=true
+          cleanup_draft() {
+            status=$?
+            set +e
+            if [ "${status}" -ne 0 ] && [ "${draft_may_exist}" = true ]; then
+              draft=$(gh release view "${GITHUB_REF_NAME}" --json body,isDraft 2>/dev/null)
+              if [ -n "${draft}" ] && \
+                 [ "$(jq -r '.isDraft' <<< "${draft}")" = true ] && \
+                 [ "$(jq -r '.body' <<< "${draft}")" = "$(cat dist/MANIFEST.md)" ]; then
+                gh release delete "${GITHUB_REF_NAME}" --yes
+              fi
+            fi
+            exit "${status}"
+          }
+          trap cleanup_draft EXIT
 
           gh release create "${GITHUB_REF_NAME}" "${files[@]}" \
             --title "${GITHUB_REF_NAME}" \
@@ -364,3 +361,5 @@ jobs:
             echo "::error::verified release is still a draft."
             exit 1
           fi
+          draft_may_exist=false
+          trap - EXIT
