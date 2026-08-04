@@ -1111,11 +1111,11 @@ func (w *Wallet) CoinTypePrivKey(ctx context.Context) (*hdkeychain.ExtendedKey, 
 	return coinTypePrivKey, nil
 }
 
-// LoadActiveDataFilters loads filters for all active addresses and unspent
+// LoadActiveDataFilters loads filters for all active addresses and relevant
 // outpoints for this wallet.
 func (w *Wallet) LoadActiveDataFilters(ctx context.Context, n NetworkBackend, reload bool) (err error) {
 	const op errors.Op = "wallet.LoadActiveDataFilters"
-	log.Infof("Loading active addresses and unspent outputs...")
+	log.Infof("Loading active addresses and relevant outpoints...")
 
 	if reload {
 		err := n.LoadTxFilter(ctx, true, nil, nil)
@@ -1189,6 +1189,23 @@ func (w *Wallet) LoadActiveDataFilters(ctx context.Context, n NetworkBackend, re
 			return err
 		}
 
+		unmined, err := w.txStore.UnminedTxs(dbtx)
+		if err != nil {
+			return err
+		}
+		for _, rec := range unmined {
+			inputs := rec.MsgTx.TxIn
+			if rec.TxType == stake.TxTypeSSGen {
+				inputs = inputs[1:]
+			}
+			for _, input := range inputs {
+				err = watchOutPoint(&input.PreviousOutPoint)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
 		_, height := w.txStore.MainChainTip(dbtx)
 		tickets, err := w.txStore.UnspentTickets(dbtx, height, true)
 		if err != nil {
@@ -1210,7 +1227,7 @@ func (w *Wallet) LoadActiveDataFilters(ctx context.Context, n NetworkBackend, re
 	if err != nil {
 		return errors.E(op, err)
 	}
-	log.Infof("Registered for transaction notifications for all relevant outputs")
+	log.Infof("Registered for transaction notifications for all relevant outpoints")
 
 	return nil
 }
