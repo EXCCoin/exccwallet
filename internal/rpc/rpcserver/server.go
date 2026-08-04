@@ -1705,6 +1705,8 @@ func (s *walletServer) PublishTransaction(ctx context.Context, req *pb.PublishTr
 // PurchaseTickets purchases tickets from the wallet.
 func (s *walletServer) PurchaseTickets(ctx context.Context,
 	req *pb.PurchaseTicketsRequest) (*pb.PurchaseTicketsResponse, error) {
+	defer zero(req.Passphrase)
+
 	// Unmarshall the received data and prepare it as input for the ticket
 	// purchase request.
 	spendLimit := dcrutil.Amount(req.SpendLimit)
