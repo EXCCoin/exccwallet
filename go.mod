@@ -4,26 +4,26 @@ go 1.25.0
 
 require (
 	github.com/EXCCoin/cspp/v2 v2.0.0-20230414143846-6df3d38b9eca
-	github.com/EXCCoin/exccd/addrmgr/v2 v2.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/blockchain/stake/v4 v4.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/blockchain/standalone/v2 v2.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/blockchain/v4 v4.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/certgen v0.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/chaincfg/chainhash v0.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/chaincfg/v3 v3.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/connmgr/v3 v3.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/crypto/blake256 v0.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/crypto/ripemd160 v0.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/dcrec v0.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/dcrec/secp256k1/v4 v4.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/dcrjson/v4 v4.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/dcrutil/v4 v4.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/gcs/v3 v3.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/hdkeychain/v3 v3.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/rpc/jsonrpc/types/v3 v3.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/rpcclient/v7 v7.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/txscript/v4 v4.0.0-20260730143812-d2b4b2c5d047
-	github.com/EXCCoin/exccd/wire v0.0.0-20260730143812-d2b4b2c5d047
+	github.com/EXCCoin/exccd/addrmgr/v2 v2.0.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/blockchain/stake/v4 v4.0.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/blockchain/standalone/v2 v2.1.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/blockchain/v4 v4.0.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/certgen v1.1.2-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/chaincfg/chainhash v1.0.4-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/chaincfg/v3 v3.1.2-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/connmgr/v3 v3.1.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/crypto/blake256 v1.0.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/crypto/ripemd160 v1.0.2-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/dcrec v1.0.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/dcrec/secp256k1/v4 v4.0.2-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/dcrjson/v4 v4.0.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/dcrutil/v4 v4.0.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/gcs/v3 v3.0.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/hdkeychain/v3 v3.1.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/rpc/jsonrpc/types/v3 v3.0.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/rpcclient/v7 v7.0.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/txscript/v4 v4.0.1-0.20260804201134-29c256501d37
+	github.com/EXCCoin/exccd/wire v1.5.1-0.20260804201134-29c256501d37
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
 	github.com/golang/protobuf v1.5.4
@@ -42,9 +42,9 @@ require (
 
 require (
 	github.com/EXCCoin/base58 v0.0.0-20180515090142-e1a805ee5d9f // indirect
-	github.com/EXCCoin/exccd v0.0.0-20260730143812-d2b4b2c5d047 // indirect
-	github.com/EXCCoin/exccd/database/v3 v3.0.0-20260730143812-d2b4b2c5d047 // indirect
-	github.com/EXCCoin/exccd/dcrec/edwards/v2 v2.0.0-20260730143812-d2b4b2c5d047 // indirect
+	github.com/EXCCoin/exccd v1.2.1-0.20260804201134-29c256501d37 // indirect
+	github.com/EXCCoin/exccd/database/v3 v3.0.1-0.20260804201134-29c256501d37 // indirect
+	github.com/EXCCoin/exccd/dcrec/edwards/v2 v2.0.3-0.20260804201134-29c256501d37 // indirect
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
 	github.com/companyzero/sntrup4591761 v0.0.0-20220309191932-9e0f3af2f07a // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
