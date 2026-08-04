@@ -10,9 +10,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   validate:
     name: Validate release source
+    if: github.event.deleted == false
     runs-on: ubuntu-24.04
     steps:
       - name: Check out the tagged commit
@@ -261,14 +266,101 @@ jobs:
           $(cat SHA256SUMS)
           \`\`\`
           EOF
+          if [ "${GITHUB_REF_NAME}" = v2.8.1 ]; then
+            cat >> MANIFEST.md <<'CORRECTION'
+
+          ## Corrected v2.8.1 release
+
+          These archives replace the original v2.8.1 binaries published from
+          commit `0169433fa6856c9b8aeb3d04b0a34b06cb1f317c`. The tag and semantic
+          version intentionally remain v2.8.1. The corrected source clears
+          ticket purchase passphrases, binds VSP policies per request, and
+          restores unmined spend filters after restart.
+
+          Moving the lightweight `v2.8.1` tag changes GitHub's generated source
+          archives to the corrected commit. The original archive hashes are
+          retained below for provenance.
+
+          ## Original artifact set
+
+          | | |
+          |---|---|
+          | Commit | `0169433fa6856c9b8aeb3d04b0a34b06cb1f317c` |
+          | Built by | `EXCCoin/exccwallet` run [30840945047](https://github.com/EXCCoin/exccwallet/actions/runs/30840945047) |
+
+          Original archive checksums:
+
+          ```
+          45e9f1a02c1da06d129b117c0681e6f60a7c9fb1abdaea6c37bcf7360a68a9a1  exccwallet-v2.8.1-darwin-amd64.tar.gz
+          c4af209e8523313edf0d40fdd119005c03ac862f93631697069a48fc80103241  exccwallet-v2.8.1-darwin-arm64.tar.gz
+          758ee4654c64854b3806f21815c9f4db7e0dab2d10165f19e6ca7275bf051e63  exccwallet-v2.8.1-linux-amd64.tar.gz
+          58c7b170153486d5dfad280d59cbdc955b8412dc509ef28e54d5832f9dfad755  exccwallet-v2.8.1-linux-arm64.tar.gz
+          f3afc8b22a8b90a358dd2ff2f0a834b12a33c07f14d8fdfe67a02016bbf61ccf  exccwallet-v2.8.1-windows-amd64.zip
+          d78355f8664f5533f3f7e42cd3c577df2534e76553c6978d31445ef38951b838  exccwallet-v2.8.1-windows-arm64.zip
+          ```
+          CORRECTION
+          fi
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
+          set -euo pipefail
+          verify_tag_ref() {
+            ref=$(gh api "repos/${GH_REPO}/git/ref/tags/${GITHUB_REF_NAME}")
+            ref_type=$(jq -r '.object.type' <<< "${ref}")
+            ref_sha=$(jq -r '.object.sha' <<< "${ref}")
+            if [ "${ref_type}" != commit ] || [ "${ref_sha}" != "${GITHUB_SHA}" ]; then
+              echo "::error::${GITHUB_REF_NAME} resolves to ${ref_type} ${ref_sha}, expected commit ${GITHUB_SHA}."
+              exit 1
+            fi
+          }
+
+          verify_tag_ref
+          shopt -s nullglob
+          archives=(dist/exccwallet-"${GITHUB_REF_NAME}"-*)
+          files=("${archives[@]}" dist/SHA256SUMS dist/MANIFEST.md)
+          if [ "${#archives[@]}" -ne 6 ] || [ "${#files[@]}" -ne 8 ]; then
+            echo "::error::expected six archives and two metadata files, found ${#archives[@]} archives and ${#files[@]} total files."
+            exit 1
+          fi
+
+          gh release create "${GITHUB_REF_NAME}" "${files[@]}" \
             --title "${GITHUB_REF_NAME}" \
             --notes-file dist/MANIFEST.md \
-            --verify-tag \
-            dist/exccwallet-* dist/SHA256SUMS dist/MANIFEST.md
+            --draft \
+            --verify-tag
+
+          verify_tag_ref
+          release=$(gh release view "${GITHUB_REF_NAME}" --json assets,isDraft,tagName)
+          if [ "$(jq -r '.isDraft' <<< "${release}")" != true ]; then
+            echo "::error::release was published before its assets were verified."
+            exit 1
+          fi
+          if [ "$(jq '.assets | length' <<< "${release}")" -ne 8 ]; then
+            echo "::error::draft release does not contain exactly eight assets."
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            name=${file##*/}
+            expected_size=$(stat -c %s "${file}")
+            expected_digest="sha256:$(sha256sum "${file}" | cut -d ' ' -f1)"
+            current=$(jq -r --arg name "${name}" \
+              '[.assets[] | select(.name == $name)] | if length == 1 then .[0] | [.size, .digest] | @tsv else empty end' \
+              <<< "${release}")
+            IFS=$'\t' read -r current_size current_digest <<< "${current}"
+            if [ "${current_size}" != "${expected_size}" ] || [ "${current_digest}" != "${expected_digest}" ]; then
+              echo "::error::draft ${name} is missing or does not match the build."
+              exit 1
+            fi
+          done
+
+          verify_tag_ref
+          gh release edit "${GITHUB_REF_NAME}" --draft=false --verify-tag
+          verify_tag_ref
+          release=$(gh release view "${GITHUB_REF_NAME}" --json isDraft)
+          if [ "$(jq -r '.isDraft' <<< "${release}")" != false ]; then
+            echo "::error::verified release is still a draft."
+            exit 1
+          fi
