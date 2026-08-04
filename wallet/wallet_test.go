@@ -20,10 +20,15 @@ func TestCurrentAgendas(t *testing.T) {
 		t.Fatalf("vote version = %d, want 11", version)
 	}
 	want := map[string]bool{
-		chaincfg.VoteIDEquihashValidation:   true,
 		chaincfg.VoteIDFixTxInputValidation: true,
 	}
+	if len(agendas) != len(want) {
+		t.Fatalf("current agendas = %d, want %d", len(agendas), len(want))
+	}
 	for _, agenda := range agendas {
+		if !want[agenda.Vote.Id] {
+			t.Fatalf("unexpected current agenda: %s", agenda.Vote.Id)
+		}
 		delete(want, agenda.Vote.Id)
 	}
 	if len(want) != 0 {

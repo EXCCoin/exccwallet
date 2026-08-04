@@ -567,8 +567,7 @@ func (w *Wallet) validateHeaderChainDifficulties(dbtx walletdb.ReadTx, chain []*
 				hash, h.Bits, bits)
 			return chain[idx:], errors.E(op, errors.Consensus, err)
 		}
-		// Strict Equihash validation is vote-activated, not positional.
-		err = blockchain.CheckProofOfWorkHash(h, h.Bits, w.chainParams)
+		err = blockchain.CheckProofOfWork(h, h.Bits, w.chainParams)
 		if err != nil {
 			return chain[idx:], errors.E(op, errors.Consensus, err)
 		}
