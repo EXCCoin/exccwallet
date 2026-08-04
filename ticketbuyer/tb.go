@@ -55,7 +55,8 @@ type Config struct {
 	MixChange          bool
 
 	// VSP client
-	VSP *vsp.Client
+	VSP       *vsp.Client
+	VSPPolicy vsp.Policy
 }
 
 // TB is an automated ticket buyer, buying as many tickets as possible given an
@@ -305,9 +306,10 @@ func (tb *TB) buy(ctx context.Context, passphrase []byte, tip *wire.BlockHeader,
 		VSPFees:    poolFees,
 	}
 	// If VSP is configured, we need to set the methods for vsp fee processment.
-	if tb.cfg.VSP != nil {
-		purchaseTicketReq.VSPFeePaymentProcess = tb.cfg.VSP.Process
-		purchaseTicketReq.VSPFeeProcess = tb.cfg.VSP.FeePercentage
+	if cfg.VSP != nil {
+		purchaseTicketReq.VSPFeePaymentProcess = vsp.BindPolicy(
+			cfg.VSP.ProcessWithPolicy, cfg.VSPPolicy)
+		purchaseTicketReq.VSPFeeProcess = cfg.VSP.FeePercentage
 	}
 	tix, err := w.PurchaseTickets(ctx, n, purchaseTicketReq)
 	if tix != nil {

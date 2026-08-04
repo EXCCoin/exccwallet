@@ -187,6 +187,7 @@ func run(ctx context.Context) error {
 
 	// Open the wallet when --noinitialload was not set.
 	var vspClient *vsp.Client
+	var vspPolicy vsp.Policy
 	passphrase := []byte{}
 	if !cfg.NoInitialLoad {
 		walletPass := []byte(cfg.WalletPass)
@@ -267,16 +268,17 @@ func run(ctx context.Context) error {
 					cfg.PurchaseAccount, err)
 				return err
 			}
+			vspPolicy = vsp.Policy{
+				MaxFee:     cfg.VSPOpts.MaxFee.Amount,
+				FeeAcct:    purchaseAcct,
+				ChangeAcct: changeAcct,
+			}
 			vspCfg := vsp.Config{
 				URL:    cfg.VSPOpts.URL,
 				PubKey: cfg.VSPOpts.PubKey,
 				Dialer: cfg.dial,
 				Wallet: w,
-				Policy: vsp.Policy{
-					MaxFee:     cfg.VSPOpts.MaxFee.Amount,
-					FeeAcct:    purchaseAcct,
-					ChangeAcct: changeAcct,
-				},
+				Policy: vspPolicy,
 			}
 			vspClient, err = ldr.VSP(vspCfg)
 			if err != nil {
@@ -361,6 +363,7 @@ func run(ctx context.Context) error {
 				c.TicketSplitAccount = ticketSplitAccount
 				c.ChangeAccount = changeAccount
 				c.VSP = vspClient
+				c.VSPPolicy = vspPolicy
 			})
 			log.Infof("Starting auto transaction creator")
 			tbdone := make(chan struct{})

@@ -1750,6 +1750,7 @@ func (s *walletServer) PurchaseTickets(ctx context.Context,
 	var vspHost string
 	var vspPubKey string
 	var vspClient *vsp.Client
+	var vspPolicy vsp.Policy
 	if req.VspHost != "" || req.VspPubkey != "" {
 		vspHost = req.VspHost
 		vspPubKey = req.VspPubkey
@@ -1759,16 +1760,17 @@ func (s *walletServer) PurchaseTickets(ctx context.Context,
 		if vspHost == "" {
 			return nil, status.Errorf(codes.InvalidArgument, "vsp host can not be null")
 		}
+		vspPolicy = vsp.Policy{
+			MaxFee:     0.1e8,
+			FeeAcct:    req.Account,
+			ChangeAcct: req.ChangeAccount,
+		}
 		cfg := vsp.Config{
 			URL:    vspHost,
 			PubKey: vspPubKey,
 			Dialer: nil,
 			Wallet: s.wallet,
-			Policy: vsp.Policy{
-				MaxFee:     0.1e8,
-				FeeAcct:    req.Account,
-				ChangeAcct: req.ChangeAccount,
-			},
+			Policy: vspPolicy,
 		}
 		vspClient, err = loader.VSP(cfg)
 		if err != nil {
@@ -1862,7 +1864,8 @@ func (s *walletServer) PurchaseTickets(ctx context.Context,
 	}
 
 	if vspClient != nil {
-		request.VSPFeePaymentProcess = vspClient.Process
+		request.VSPFeePaymentProcess = vsp.BindPolicy(
+			vspClient.ProcessWithPolicy, vspPolicy)
 		request.VSPFeeProcess = vspClient.FeePercentage
 	}
 
@@ -2611,6 +2614,7 @@ func (t *ticketbuyerV2Server) RunTicketBuyer(req *pb.RunTicketBuyerRequest, svr 
 	var vspHost string
 	var vspPubKey string
 	var vspClient *vsp.Client
+	var vspPolicy vsp.Policy
 	if req.VspHost != "" || req.VspPubkey != "" {
 		vspHost = req.VspHost
 		vspPubKey = req.VspPubkey
@@ -2620,16 +2624,17 @@ func (t *ticketbuyerV2Server) RunTicketBuyer(req *pb.RunTicketBuyerRequest, svr 
 		if vspHost == "" {
 			return status.Errorf(codes.InvalidArgument, "vsp host can not be null")
 		}
+		vspPolicy = vsp.Policy{
+			MaxFee:     0.1e8,
+			FeeAcct:    req.Account,
+			ChangeAcct: req.ChangeAccount,
+		}
 		cfg := vsp.Config{
 			URL:    vspHost,
 			PubKey: vspPubKey,
 			Dialer: nil,
 			Wallet: wallet,
-			Policy: vsp.Policy{
-				MaxFee:     0.1e8,
-				FeeAcct:    req.Account,
-				ChangeAcct: req.Account,
-			},
+			Policy: vspPolicy,
 		}
 		vspClient, err = loader.VSP(cfg)
 		if err != nil {
@@ -2697,6 +2702,7 @@ func (t *ticketbuyerV2Server) RunTicketBuyer(req *pb.RunTicketBuyerRequest, svr 
 		c.MixedAccountBranch = mixedAccountBranch
 		c.TicketSplitAccount = mixedSplitAccount
 		c.Limit = limit
+		c.VSPPolicy = vspPolicy
 	})
 
 	if len(req.Passphrase) > 0 {

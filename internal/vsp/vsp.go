@@ -26,6 +26,15 @@ type Policy struct {
 	FeeAcct    uint32 // to pay fees from, if inputs are not provided to Process
 }
 
+// BindPolicy returns a fee payment callback using a request-specific policy.
+func BindPolicy(process func(context.Context, *chainhash.Hash, *wire.MsgTx, Policy) error,
+	policy Policy) func(context.Context, *chainhash.Hash, *wire.MsgTx) error {
+
+	return func(ctx context.Context, hash *chainhash.Hash, tx *wire.MsgTx) error {
+		return process(ctx, hash, tx, policy)
+	}
+}
+
 type Client struct {
 	Wallet *wallet.Wallet
 	Policy Policy
@@ -124,7 +133,7 @@ func (c *Client) ProcessUnprocessedTickets(ctx context.Context, policy Policy) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := c.Process(ctx, hash, nil)
+			err := c.ProcessWithPolicy(ctx, hash, nil, policy)
 			if err != nil {
 				log.Error(err)
 			}

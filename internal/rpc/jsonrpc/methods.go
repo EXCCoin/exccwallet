@@ -3439,12 +3439,12 @@ func (s *Server) purchaseTicket(ctx context.Context, icmd interface{}) (interfac
 			return nil, rpcErrorf(dcrjson.ErrRPCInvalidParameter,
 				"MixedAccountBranch should be 0 or 1.")
 		}
-		_, err = w.AccountNumber(ctx, s.cfg.TicketSplitAccount)
+		mixedSplitAccount, err = w.AccountNumber(ctx, s.cfg.TicketSplitAccount)
 		if err != nil {
 			return nil, rpcErrorf(dcrjson.ErrRPCInvalidParameter,
 				"CSPP Server set, but error on mixedSplitAccount: %v", err)
 		}
-		_, err = w.AccountNumber(ctx, s.cfg.MixChangeAccount)
+		changeAccount, err = w.AccountNumber(ctx, s.cfg.MixChangeAccount)
 		if err != nil {
 			return nil, rpcErrorf(dcrjson.ErrRPCInvalidParameter,
 				"CSPP Server set, but error on changeAccount: %v", err)
@@ -3454,6 +3454,7 @@ func (s *Server) purchaseTicket(ctx context.Context, icmd interface{}) (interfac
 	var vspHost string
 	var vspPubKey string
 	var vspClient *vsp.Client
+	var vspPolicy vsp.Policy
 	if s.cfg.VSPHost != "" || s.cfg.VSPPubKey != "" {
 		vspHost = s.cfg.VSPHost
 		vspPubKey = s.cfg.VSPPubKey
@@ -3465,16 +3466,17 @@ func (s *Server) purchaseTicket(ctx context.Context, icmd interface{}) (interfac
 			return nil, rpcErrorf(dcrjson.ErrRPCInvalidParameter,
 				"vsp host can not be null")
 		}
+		vspPolicy = vsp.Policy{
+			MaxFee:     0.2e8,
+			FeeAcct:    account,
+			ChangeAcct: changeAccount,
+		}
 		cfg := vsp.Config{
 			URL:    vspHost,
 			PubKey: vspPubKey,
 			Dialer: s.cfg.Dial,
 			Wallet: w,
-			Policy: vsp.Policy{
-				MaxFee:     0.2e8,
-				FeeAcct:    account,
-				ChangeAcct: changeAccount,
-			},
+			Policy: vspPolicy,
 		}
 		vspClient, err = loader.VSP(cfg)
 		if err != nil {
@@ -3504,7 +3506,8 @@ func (s *Server) purchaseTicket(ctx context.Context, icmd interface{}) (interfac
 	}
 
 	if vspClient != nil {
-		request.VSPFeePaymentProcess = vspClient.Process
+		request.VSPFeePaymentProcess = vsp.BindPolicy(
+			vspClient.ProcessWithPolicy, vspPolicy)
 		request.VSPFeeProcess = vspClient.FeePercentage
 	}
 
