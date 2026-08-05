@@ -9,13 +9,13 @@ import (
 	"net/url"
 	"sync"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/wallet"
-	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/wallet"
+	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
 )
 
 type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -402,7 +402,7 @@ func (c *Client) TrackedTickets() []*TicketInfo {
 	}
 	c.mu.Unlock()
 
-	tickets := make([]*TicketInfo, 0, len(c.jobs))
+	tickets := make([]*TicketInfo, 0, len(jobs))
 	for _, job := range jobs {
 		job.mu.Lock()
 		tickets = append(tickets, &TicketInfo{

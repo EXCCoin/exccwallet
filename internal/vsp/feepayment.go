@@ -135,6 +135,43 @@ func parseTicket(ticket *wire.MsgTx, params *chaincfg.Params) (
 	return
 }
 
+// calcHeights checks if the ticket has been mined, and if so, sets the live
+// height and expiry height fields.  The caller must hold fp.mu.
+func (fp *feePayment) calcHeights() {
+	_, minedHeight, err := fp.client.Wallet.TxBlock(fp.ctx, &fp.ticketHash)
+	if err != nil {
+		// The ticket was already fetched from the wallet before reaching here.
+		log.Errorf("failed to query block which mines ticket: %v", err)
+		return
+	}
+	if minedHeight < 2 {
+		return
+	}
+
+	params := fp.client.Wallet.ChainParams()
+	// Tickets become live one block after the parameter-indicated height.
+	fp.ticketLive = minedHeight + int32(params.TicketMaturity) + 1
+	fp.ticketExpires = fp.ticketLive + int32(params.TicketExpiry)
+}
+
+// expiryHeight returns zero until the ticket is mined.  The caller must hold
+// fp.mu.
+func (fp *feePayment) expiryHeight() int32 {
+	if fp.ticketExpires == 0 {
+		fp.calcHeights()
+	}
+	return fp.ticketExpires
+}
+
+// liveHeight returns zero until the ticket is mined.  The caller must hold
+// fp.mu.
+func (fp *feePayment) liveHeight() int32 {
+	if fp.ticketLive == 0 {
+		fp.calcHeights()
+	}
+	return fp.ticketLive
+}
+
 func (fp *feePayment) ticketSpent() bool {
 	ctx := fp.ctx
 	ticketOut := wire.OutPoint{Hash: fp.ticketHash, Index: 0, Tree: 1}
@@ -148,7 +185,7 @@ func (fp *feePayment) ticketExpired() bool {
 	_, tipHeight := w.MainChainTip(ctx)
 
 	fp.mu.Lock()
-	expires := fp.ticketExpires
+	expires := fp.expiryHeight()
 	fp.mu.Unlock()
 
 	return expires > 0 && tipHeight >= expires
@@ -231,29 +268,14 @@ func (c *Client) feePayment(ticketHash *chainhash.Hash, policy Policy, paidConfi
 		return nil
 	}
 
-	_, ticketHeight, err := w.TxBlock(ctx, ticketHash)
-	if err != nil {
-		// This is not expected to ever error, as the ticket was fetched
-		// from the wallet in the above call.
-		log.Errorf("failed to query block which mines ticket: %v", err)
-		return nil
-	}
-	if ticketHeight >= 2 {
-		// Note the off-by-one; this is correct.  Tickets become live
-		// one block after the params would indicate.
-		fp.ticketLive = ticketHeight + int32(params.TicketMaturity) + 1
-		fp.ticketExpires = fp.ticketLive + int32(params.TicketExpiry)
-	}
-
 	fp.votingAddr, fp.commitmentAddr, err = parseTicket(ticket, params)
 	if err != nil {
 		log.Errorf("%v is not a ticket: %v", ticketHash, err)
 		return nil
 	}
-	// Try to access the voting key, ignore error unless the wallet is
-	// locked.
+	// Try to access the voting key.
 	fp.votingKey, err = w.DumpWIFPrivateKey(ctx, fp.votingAddr)
-	if err != nil && !errors.Is(err, errors.Locked) {
+	if err != nil {
 		log.Errorf("no voting key for ticket %v: %v", ticketHash, err)
 		return nil
 	}
@@ -327,15 +349,22 @@ func (fp *feePayment) next() time.Duration {
 	_, tipHeight := w.MainChainTip(fp.ctx)
 
 	fp.mu.Lock()
-	ticketLive := fp.ticketLive
-	ticketExpires := fp.ticketExpires
+	ticketLive := fp.liveHeight()
+	ticketExpires := fp.expiryHeight()
 	fp.mu.Unlock()
+
+	return prng.duration(nextJitter(tipHeight, ticketLive, ticketExpires,
+		params.TargetTimePerBlock))
+}
+
+func nextJitter(tipHeight, ticketLive, ticketExpires int32,
+	targetTimePerBlock time.Duration) time.Duration {
 
 	var jitter time.Duration
 	switch {
 	case tipHeight < ticketLive: // immature, mined ticket
-		blocksUntilLive := ticketExpires - tipHeight
-		jitter = params.TargetTimePerBlock * time.Duration(blocksUntilLive)
+		blocksUntilLive := ticketLive - tipHeight
+		jitter = targetTimePerBlock * time.Duration(blocksUntilLive)
 		if jitter > immatureJitter {
 			jitter = immatureJitter
 		}
@@ -344,8 +373,7 @@ func (fp *feePayment) next() time.Duration {
 	default: // unmined ticket
 		jitter = unminedJitter
 	}
-
-	return prng.duration(jitter)
+	return jitter
 }
 
 // task returns a function running a feePayment method.
@@ -920,7 +948,9 @@ func (fp *feePayment) submitPayment() (err error) {
 			if err != nil {
 				log.Errorf("error abandoning expired fee tx %v", err)
 			}
+			fp.mu.Lock()
 			fp.feeTx = nil
+			fp.mu.Unlock()
 		}
 		return fmt.Errorf("payfee: %w", err)
 	}
@@ -955,33 +985,8 @@ func (fp *feePayment) confirmPayment() (err error) {
 	}()
 
 	status, err := fp.client.status(ctx, &fp.ticketHash)
-	// Suppress log if the wallet is currently locked.
-	if err != nil && !errors.Is(err, errors.Locked) {
-		log.Warnf("Rescheduling status check for %v: %v", &fp.ticketHash, err)
-	}
 	if err != nil {
-		// Stop processing if the status check cannot be performed, but
-		// a significant amount of confirmations are observed on the fee
-		// transaction.
-		//
-		// Otherwise, chedule another confirmation check, in case the
-		// status API can be performed at a later time or more
-		// confirmations are observed.
-		fp.mu.Lock()
-		feeHash := fp.feeHash
-		fp.mu.Unlock()
-		confs, err := w.TxConfirms(ctx, &feeHash)
-		if err != nil {
-			return err
-		}
-		if confs >= 6 {
-			fp.remove("confirmed")
-			err = w.UpdateVspTicketFeeToConfirmed(ctx, &fp.ticketHash, &feeHash, fp.client.url, fp.client.pub)
-			if err != nil {
-				return err
-			}
-			return nil
-		}
+		log.Warnf("Rescheduling status check for %v: %v", &fp.ticketHash, err)
 		fp.schedule("confirm payment", fp.confirmPayment)
 		return nil
 	}
@@ -1000,7 +1005,10 @@ func (fp *feePayment) confirmPayment() (err error) {
 	case "confirmed":
 		fp.remove("confirmed by VSP")
 		// nothing scheduled
-		err = w.UpdateVspTicketFeeToConfirmed(ctx, &fp.ticketHash, &fp.feeHash, fp.client.url, fp.client.pub)
+		fp.mu.Lock()
+		feeHash := fp.feeHash
+		fp.mu.Unlock()
+		err = w.UpdateVspTicketFeeToConfirmed(ctx, &fp.ticketHash, &feeHash, fp.client.url, fp.client.pub)
 		if err != nil {
 			return err
 		}

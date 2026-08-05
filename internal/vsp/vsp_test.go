@@ -6,7 +6,9 @@ package vsp
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/wire"
@@ -33,4 +35,53 @@ func TestBindPolicyIsRequestLocal(t *testing.T) {
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("wrong policy: got %+v, want %+v", got, want)
 	}
+}
+
+func TestNextJitter(t *testing.T) {
+	tests := []struct {
+		name                              string
+		tip, live, expires                int32
+		targetTimePerBlock, wantMaxJitter time.Duration
+	}{
+		{"unmined", 100, 0, 0, 5 * time.Minute, unminedJitter},
+		{"immature", 100, 102, 40962, 5 * time.Minute, 10 * time.Minute},
+		{"immature capped", 100, 200, 40962, 5 * time.Minute, immatureJitter},
+		{"live", 102, 102, 40962, 5 * time.Minute, liveJitter},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := nextJitter(test.tip, test.live, test.expires,
+				test.targetTimePerBlock)
+			if got != test.wantMaxJitter {
+				t.Fatalf("got %v, want %v", got, test.wantMaxJitter)
+			}
+		})
+	}
+}
+
+func TestTrackedTicketsConcurrentJobs(t *testing.T) {
+	c := &Client{jobs: make(map[chainhash.Hash]*feePayment)}
+	const iterations = 1000
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			hash := chainhash.Hash{byte(i)}
+			c.mu.Lock()
+			c.jobs[hash] = &feePayment{ticketHash: hash}
+			if i > 1 {
+				delete(c.jobs, chainhash.Hash{byte(i - 2)})
+			}
+			c.mu.Unlock()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			_ = c.TrackedTickets()
+		}
+	}()
+	wg.Wait()
 }
