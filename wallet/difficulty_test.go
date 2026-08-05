@@ -7,6 +7,7 @@ package wallet
 import (
 	"context"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	blockchain "github.com/EXCCoin/exccd/blockchain/standalone/v2"
@@ -39,6 +40,43 @@ func TestValidateHeaderChainDifficultiesRejectsInvalidEquihash(t *testing.T) {
 	invalid, err := w.ValidateHeaderChainDifficulties(context.Background(), chain, 0)
 	if !errors.Is(err, errors.Consensus) {
 		t.Fatalf("error = %v, want consensus error", err)
+	}
+	if len(invalid) != 1 || *invalid[0].Hash != hash {
+		t.Fatalf("invalid suffix = %v, want header %v", invalid, hash)
+	}
+}
+
+func TestValidateHeaderChainDifficultiesRejectsEarlyMainNetSBits(t *testing.T) {
+	t.Parallel()
+
+	// Keep fast test PoW while exercising the mainnet deployment selector.
+	params := chaincfg.SimNetParams()
+	params.Net = wire.MainNet
+	cfg := basicWalletConfig
+	cfg.Params = params
+	w, teardown := testWallet(t, &cfg)
+	defer teardown()
+	ctx := context.Background()
+	if _, err := w.NextStakeDifficulty(ctx); err != nil {
+		t.Fatalf("next stake difficulty at genesis: %v", err)
+	}
+
+	tg := maketg(t, params)
+	block := tg.CreateBlockOne("bad-sbits", 0, func(b *wire.MsgBlock) {
+		b.Header.Bits = params.GenesisBlock.Header.Bits
+		b.Header.SBits = params.MinimumStakeDiff + 1
+	})
+	header := block.Header
+	if err := blockchain.CheckProofOfWork(&header, header.Bits, params); err != nil {
+		t.Fatalf("test header proof of work: %v", err)
+	}
+
+	hash := header.BlockHash()
+	chain := []*BlockNode{{Header: &header, Hash: &hash}}
+	invalid, err := w.ValidateHeaderChainDifficulties(ctx, chain, 0)
+	if !errors.Is(err, errors.Consensus) ||
+		!strings.Contains(err.Error(), "invalid PoS difficulty") {
+		t.Fatalf("error = %v, want invalid PoS difficulty consensus error", err)
 	}
 	if len(invalid) != 1 || *invalid[0].Hash != hash {
 		t.Fatalf("invalid suffix = %v, want header %v", invalid, hash)
