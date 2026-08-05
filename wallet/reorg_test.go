@@ -8,14 +8,19 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	blockchain "github.com/EXCCoin/exccd/blockchain/standalone/v2"
 	"github.com/EXCCoin/exccd/blockchain/v4/chaingen"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
+	"github.com/EXCCoin/exccd/dcrutil/v4"
+	gcs2 "github.com/EXCCoin/exccd/gcs/v3"
 	"github.com/EXCCoin/exccd/gcs/v3/blockcf2"
 	"github.com/EXCCoin/exccd/txscript/v4"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 )
 
 type tg struct {
@@ -172,6 +177,98 @@ func TestStakeInfoIncludesHeaderPoolSize(t *testing.T) {
 	}
 	if info.PoolSize != poolSize {
 		t.Fatalf("pool size = %d, want %d", info.PoolSize, poolSize)
+	}
+}
+
+func TestChainSwitchPrunesTicketsWithNextStakeDifficulty(t *testing.T) {
+	ctx := context.Background()
+	w, teardown := testWallet(t, &basicWalletConfig)
+	defer teardown()
+
+	params := w.chainParams
+	emptyFilter, err := gcs2.FromBytesV2(blockcf2.B, blockcf2.M, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prevHash := params.GenesisHash
+	err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
+		ns := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
+		for height := uint32(1); height < 23; height++ {
+			header := wire.BlockHeader{
+				PrevBlock: prevHash,
+				Height:    height,
+				Bits:      params.PowLimitBits,
+				SBits:     params.MinimumStakeDiff,
+			}
+			if height == 15 {
+				header.PoolSize = 1
+			}
+			if err := w.txStore.ExtendMainChain(ns, &header, emptyFilter); err != nil {
+				return err
+			}
+			prevHash = header.BlockHash()
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	header := &wire.BlockHeader{
+		PrevBlock: prevHash,
+		Height:    23,
+		Bits:      params.PowLimitBits,
+		SBits:     params.MinimumStakeDiff,
+		PoolSize:  400,
+	}
+	var nextStakeDiff dcrutil.Amount
+	err = walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
+		var err error
+		nextStakeDiff, err = w.nextRequiredDCP0001PoSDifficulty(dbtx, header, nil)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int64(nextStakeDiff) == header.SBits {
+		t.Fatal("test setup did not change stake difficulty")
+	}
+
+	funding := wire.NewMsgTx()
+	funding.AddTxOut(wire.NewTxOut(int64(nextStakeDiff)+1, []byte{txscript.OP_TRUE}))
+	spend := chaingen.MakeSpendableOutForTx(funding, 1, 0, 0)
+	ticket := maketg(t, params).CreateTicketPurchaseTx(&spend, nextStakeDiff, 1)
+	rec, err := udb.NewTxRecordFromMsgTx(ticket, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
+		return w.txStore.InsertMemPoolTx(dbtx, rec)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hash := header.BlockHash()
+	node := NewBlockNode(header, &hash, emptyFilter, []*wire.MsgTx{})
+	forest := new(SidechainForest)
+	mustAddBlockNode(t, forest, node)
+	if _, err := w.ChainSwitch(ctx, forest, []*BlockNode{node}); err != nil {
+		t.Fatal(err)
+	}
+
+	var unmined []*chainhash.Hash
+	err = walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
+		ns := dbtx.ReadBucket(wtxmgrNamespaceKey)
+		var err error
+		unmined, err = w.txStore.UnminedTxHashes(ns)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unmined) != 1 || *unmined[0] != rec.Hash {
+		t.Fatalf("unmined transactions = %v, want ticket %v", unmined, rec.Hash)
 	}
 }
 
