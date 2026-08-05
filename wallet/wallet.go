@@ -5780,6 +5780,14 @@ func (w *Wallet) UpdateVspTicketFeeToConfirmed(ctx context.Context, ticketHash, 
 
 // ForUnspentUnexpiredTickets performs a function on every unexpired and unspent
 // ticket from the wallet.
+func unspentUnexpiredTicketStartHeight(blockHeight int32, ticketExpiry uint32,
+	ticketMaturity uint16) int32 {
+
+	const requiredConfs = 6 + 2
+	return max(int32(0), blockHeight-int32(ticketExpiry)-
+		int32(ticketMaturity)+requiredConfs)
+}
+
 func (w *Wallet) ForUnspentUnexpiredTickets(ctx context.Context,
 	f func(hash *chainhash.Hash) error) error {
 
@@ -5805,10 +5813,9 @@ func (w *Wallet) ForUnspentUnexpiredTickets(ctx context.Context,
 		return false, nil
 	}
 
-	const requiredConfs = 6 + 2
 	_, blockHeight := w.MainChainTip(ctx)
-	startBlockNum := blockHeight -
-		int32(params.TicketExpiry+uint32(params.TicketMaturity)-requiredConfs)
+	startBlockNum := unspentUnexpiredTicketStartHeight(blockHeight,
+		params.TicketExpiry, params.TicketMaturity)
 	startBlock := NewBlockIdentifierFromHeight(startBlockNum)
 	endBlock := NewBlockIdentifierFromHeight(blockHeight)
 	return w.GetTickets(ctx, iter, startBlock, endBlock)

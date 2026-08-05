@@ -4150,7 +4150,7 @@ func (s *walletServer) ProcessManagedTickets(ctx context.Context, req *pb.Proces
 		return nil, status.Errorf(codes.Unknown, "VSPClient instance failed to start. Error: %v", err)
 	}
 
-	err = vspClient.ProcessManagedTickets(ctx, policy)
+	err = vspClient.RecoverManagedTickets(ctx, policy)
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, "ProcessManagedTickets failed. Error: %v", err)
 	}

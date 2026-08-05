@@ -59,6 +59,28 @@ func TestTicketPriceSpendLimit(t *testing.T) {
 	}
 }
 
+func TestUnspentUnexpiredTicketStartHeight(t *testing.T) {
+	t.Parallel()
+	params := chaincfg.SimNetParams()
+	tests := []struct {
+		name       string
+		tip        int32
+		wantHeight int32
+	}{
+		{name: "low tip clamps to genesis", tip: 157, wantHeight: 0},
+		{name: "normal tip", tip: 1000, wantHeight: 608},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := unspentUnexpiredTicketStartHeight(test.tip,
+				params.TicketExpiry, params.TicketMaturity)
+			if got != test.wantHeight {
+				t.Fatalf("start height = %d, want %d", got, test.wantHeight)
+			}
+		})
+	}
+}
+
 func TestCoinbaseMatured(t *testing.T) {
 	t.Parallel()
 	params := chaincfg.MainNetParams()

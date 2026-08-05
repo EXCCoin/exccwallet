@@ -153,25 +153,38 @@ func (c *Client) ProcessTicket(ctx context.Context, hash *chainhash.Hash) error 
 	return nil
 }
 
-func skipManagedTicket(confirmed bool, err error) (bool, error) {
+func skipManagedTicket(confirmed bool, err error, localOnly bool) (bool, error) {
 	if err != nil {
 		if errors.Is(err, errors.NotExist) {
-			return true, nil
+			return localOnly, nil
 		}
 		return false, err
 	}
 	return confirmed, nil
 }
 
-// ProcessManagedTickets discovers tickets which were previously registered with
-// a VSP and begins syncing them in the background.  This is used to recover VSP
-// tracking after seed restores, and is only performed on unspent and unexpired
-// tickets.
+func isUnknownTicketError(err error) bool {
+	var apiErr *BadRequestError
+	return errors.As(err, &apiErr) && apiErr.Code == codeUnknownTicket
+}
+
+// ProcessManagedTickets resumes locally associated tickets at the VSP.
 func (c *Client) ProcessManagedTickets(ctx context.Context, policy Policy) error {
+	return c.processManagedTickets(ctx, policy, true)
+}
+
+// RecoverManagedTickets discovers tickets previously registered with a VSP.
+// This recovers tracking after seed restores and only considers unspent and
+// unexpired tickets.
+func (c *Client) RecoverManagedTickets(ctx context.Context, policy Policy) error {
+	return c.processManagedTickets(ctx, policy, false)
+}
+
+func (c *Client) processManagedTickets(ctx context.Context, policy Policy, localOnly bool) error {
 	err := c.Wallet.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
 		// We only want to process tickets that haven't been confirmed yet.
 		confirmed, err := c.Wallet.IsVSPTicketConfirmed(ctx, hash)
-		skip, err := skipManagedTicket(confirmed, err)
+		skip, err := skipManagedTicket(confirmed, err, localOnly)
 		if err != nil {
 			return err
 		}
@@ -191,10 +204,10 @@ func (c *Client) ProcessManagedTickets(ctx context.Context, policy Policy) error
 		// for processing a new ticket.
 		status, err := c.status(ctx, hash)
 		if err != nil {
-			if errors.Is(err, errors.Locked) {
-				return err
+			if isUnknownTicketError(err) {
+				return nil
 			}
-			return nil
+			return err
 		}
 
 		if status.FeeTxStatus == "confirmed" {

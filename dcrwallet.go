@@ -431,7 +431,10 @@ func run(ctx context.Context) error {
 
 		loader.RunAfterLoad(func(w *wallet.Wallet) {
 			if vspClient != nil && cfg.VSPOpts.Sync {
-				vspClient.ProcessManagedTickets(ctx, vspClient.Policy)
+				err := vspClient.ProcessManagedTickets(ctx, vspClient.Policy)
+				if err != nil {
+					log.Errorf("Processing managed VSP tickets failed: %v", err)
+				}
 			}
 
 			if cfg.SPV {
