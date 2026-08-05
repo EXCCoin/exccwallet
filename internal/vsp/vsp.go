@@ -153,6 +153,16 @@ func (c *Client) ProcessTicket(ctx context.Context, hash *chainhash.Hash) error 
 	return nil
 }
 
+func skipManagedTicket(confirmed bool, err error) (bool, error) {
+	if err != nil {
+		if errors.Is(err, errors.NotExist) {
+			return true, nil
+		}
+		return false, err
+	}
+	return confirmed, nil
+}
+
 // ProcessManagedTickets discovers tickets which were previously registered with
 // a VSP and begins syncing them in the background.  This is used to recover VSP
 // tracking after seed restores, and is only performed on unspent and unexpired
@@ -161,11 +171,11 @@ func (c *Client) ProcessManagedTickets(ctx context.Context, policy Policy) error
 	err := c.Wallet.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
 		// We only want to process tickets that haven't been confirmed yet.
 		confirmed, err := c.Wallet.IsVSPTicketConfirmed(ctx, hash)
-		if err != nil && !errors.Is(err, errors.NotExist) {
-			log.Error(err)
-			return nil
+		skip, err := skipManagedTicket(confirmed, err)
+		if err != nil {
+			return err
 		}
-		if confirmed {
+		if skip {
 			return nil
 		}
 		c.mu.Lock()

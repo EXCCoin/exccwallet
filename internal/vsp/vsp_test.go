@@ -12,6 +12,7 @@ import (
 
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
 )
 
 func TestBindPolicyIsRequestLocal(t *testing.T) {
@@ -34,6 +35,34 @@ func TestBindPolicyIsRequestLocal(t *testing.T) {
 	}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("wrong policy: got %+v, want %+v", got, want)
+	}
+}
+
+func TestSkipManagedTicket(t *testing.T) {
+	unexpectedErr := errors.E(errors.IO)
+	tests := []struct {
+		name      string
+		confirmed bool
+		err       error
+		wantSkip  bool
+		wantErr   error
+	}{
+		{name: "unmanaged", err: errors.E(errors.NotExist), wantSkip: true},
+		{name: "unexpected error", err: unexpectedErr, wantErr: unexpectedErr},
+		{name: "confirmed", confirmed: true, wantSkip: true},
+		{name: "unconfirmed"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotSkip, gotErr := skipManagedTicket(test.confirmed, test.err)
+			if gotSkip != test.wantSkip {
+				t.Fatalf("skip: got %v, want %v", gotSkip, test.wantSkip)
+			}
+			if gotErr != test.wantErr {
+				t.Fatalf("error: got %v, want %v", gotErr, test.wantErr)
+			}
+		})
 	}
 }
 
