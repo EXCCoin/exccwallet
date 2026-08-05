@@ -8,8 +8,73 @@ import (
 	"context"
 	"testing"
 
+	blockchain "github.com/EXCCoin/exccd/blockchain/standalone/v2"
+	"github.com/EXCCoin/exccd/chaincfg/chainhash"
+	gcs2 "github.com/EXCCoin/exccd/gcs/v3"
+	"github.com/EXCCoin/exccd/gcs/v3/blockcf2"
+	"github.com/EXCCoin/exccd/wire"
 	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 )
+
+func TestAddrFinderIncludesTipFilter(t *testing.T) {
+	ctx := context.Background()
+	w, teardown := testWallet(t, &basicWalletConfig)
+	defer teardown()
+
+	w.addressBuffersMu.Lock()
+	xpub := w.addressBuffers[0].albExternal.branchXpub
+	w.addressBuffersMu.Unlock()
+	addr, err := deriveChildAddress(xpub, 0, w.chainParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, script := addr.PaymentScript()
+
+	tx := wire.NewMsgTx()
+	tx.AddTxOut(wire.NewTxOut(1, script))
+	header := wire.BlockHeader{
+		PrevBlock:  w.chainParams.GenesisHash,
+		MerkleRoot: blockchain.CalcTxTreeMerkleRoot([]*wire.MsgTx{tx}),
+		Height:     1,
+	}
+	block := wire.NewMsgBlock(&header)
+	block.AddTransaction(tx)
+	key := blockcf2.Key(&header.MerkleRoot)
+	filter, err := gcs2.NewFilterV2(blockcf2.B, blockcf2.M, key, [][]byte{script})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
+		ns := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
+		return w.txStore.ExtendMainChain(ns, &header, filter)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	finder, err := newAddrFinder(ctx, w, w.GapLimit())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blockRequests int
+	peer := &peerFuncs{blocks: func(_ context.Context, hashes []*chainhash.Hash) ([]*wire.MsgBlock, error) {
+		blockRequests++
+		if len(hashes) != 1 || *hashes[0] != header.BlockHash() {
+			t.Fatalf("requested blocks = %v, want %v", hashes, header.BlockHash())
+		}
+		return []*wire.MsgBlock{block}, nil
+	}}
+	hash := header.BlockHash()
+	if err := finder.find(ctx, &hash, peer); err != nil {
+		t.Fatal(err)
+	}
+	if blockRequests != 1 {
+		t.Fatalf("block requests = %d, want 1", blockRequests)
+	}
+	if got := finder.usage[0].extLastUsed; got != 0 {
+		t.Fatalf("last used external index = %d, want 0", got)
+	}
+}
 
 // TestDiscoveryCursorPos tests that the account cursor index is not reset
 // during address discovery such that an address could be reused.
