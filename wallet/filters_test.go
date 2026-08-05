@@ -32,6 +32,47 @@ func (n *filterRecordingNetwork) LoadTxFilter(_ context.Context, reload bool,
 	return nil
 }
 
+type contextRecordingNetwork struct {
+	mockNetwork
+	loadCalls       int
+	canceledContext bool
+}
+
+func (n *contextRecordingNetwork) LoadTxFilter(ctx context.Context, _ bool,
+	_ []stdaddr.Address, _ []wire.OutPoint) error {
+
+	n.loadCalls++
+	n.canceledContext = n.canceledContext || ctx.Err() != nil
+	return nil
+}
+
+func TestPurchaseTicketsWatchesAfterRequestCancellation(t *testing.T) {
+	w, teardown := testWallet(t, &basicWalletConfig)
+	defer teardown()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	n := new(contextRecordingNetwork)
+	req := &PurchaseTicketsRequest{
+		VSPFeeProcess: func(context.Context) (float64, error) {
+			cancel()
+			return 0, context.Canceled
+		},
+		VSPFeePaymentProcess: func(context.Context, *chainhash.Hash, *wire.MsgTx) error {
+			return nil
+		},
+	}
+	_, err := w.purchaseTickets(ctx, "test", n, req)
+	if err == nil {
+		t.Fatal("purchaseTickets succeeded after request cancellation")
+	}
+	if n.loadCalls == 0 {
+		t.Fatal("transaction filters were not updated after request cancellation")
+	}
+	if n.canceledContext {
+		t.Fatal("transaction filters were updated with the canceled request context")
+	}
+}
+
 func TestLoadActiveDataFiltersWatchesUnminedInputs(t *testing.T) {
 	w, teardown := testWallet(t, &basicWalletConfig)
 	defer teardown()
