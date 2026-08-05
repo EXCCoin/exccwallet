@@ -32,6 +32,7 @@ import (
 	"github.com/EXCCoin/exccwallet/v2/wallet/txauthor"
 	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
 	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
+
 	"github.com/EXCCoin/exccd/blockchain/stake/v4"
 	blockchain "github.com/EXCCoin/exccd/blockchain/standalone/v2"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
@@ -4389,34 +4390,21 @@ func (s *Server) updateVSPVoteChoices(ctx context.Context, w *wallet.Wallet, tic
 		err = vspClient.SetVoteChoice(ctx, ticketHash, choices, tspendPolicy, treasuryPolicy)
 		return err
 	}
-	var firstErr error
-	err := w.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
+	return w.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
 		vspHost, err := w.VSPHostForTicket(ctx, hash)
-		if err != nil && firstErr == nil {
+		if err != nil {
 			if errors.Is(err, errors.NotExist) {
 				// Ticket is not registered with a VSP, nothing more to do here.
 				return nil
 			}
-			firstErr = err
-			return nil
+			return err
 		}
 		vspClient, err := loader.LookupVSP(vspHost)
-		if err != nil && firstErr == nil {
-			firstErr = err
-			return nil
+		if err != nil {
+			return err
 		}
-		// Never return errors here, so all tickets are tried.
-		// The first error will be returned to the user.
-		err = vspClient.SetVoteChoice(ctx, hash, choices, tspendPolicy, treasuryPolicy)
-		if err != nil && firstErr == nil {
-			firstErr = err
-		}
-		return nil
+		return vspClient.SetVoteChoice(ctx, hash, choices, tspendPolicy, treasuryPolicy)
 	})
-	if err != nil {
-		return err
-	}
-	return firstErr
 }
 
 // signMessage signs the given message with the private key for the given

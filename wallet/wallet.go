@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -5793,6 +5794,8 @@ func (w *Wallet) ForUnspentUnexpiredTickets(ctx context.Context,
 
 	params := w.ChainParams()
 
+	// Collect callback errors so every ticket is visited.
+	var errs []error
 	iter := func(ticketSummaries []*TicketSummary, _ *wire.BlockHeader) (bool, error) {
 		for _, ticketSummary := range ticketSummaries {
 			switch ticketSummary.Status {
@@ -5806,7 +5809,7 @@ func (w *Wallet) ForUnspentUnexpiredTickets(ctx context.Context,
 			ticketHash := *ticketSummary.Ticket.Hash
 			err := f(&ticketHash)
 			if err != nil {
-				return false, err
+				errs = append(errs, err)
 			}
 		}
 
@@ -5818,5 +5821,9 @@ func (w *Wallet) ForUnspentUnexpiredTickets(ctx context.Context,
 		params.TicketExpiry, params.TicketMaturity)
 	startBlock := NewBlockIdentifierFromHeight(startBlockNum)
 	endBlock := NewBlockIdentifierFromHeight(blockHeight)
-	return w.GetTickets(ctx, iter, startBlock, endBlock)
+	err := w.GetTickets(ctx, iter, startBlock, endBlock)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	return stderrors.Join(errs...)
 }

@@ -88,6 +88,29 @@ func TestIsUnknownTicketError(t *testing.T) {
 	}
 }
 
+func TestVotePolicyChanged(t *testing.T) {
+	current := map[string]string{"key": "no"}
+	if votePolicyChanged(current, map[string]string{"key": "no"}) {
+		t.Fatal("matching policy reported as changed")
+	}
+	if !votePolicyChanged(current, map[string]string{"key": "yes"}) {
+		t.Fatal("different policy not reported as changed")
+	}
+	if !votePolicyChanged(current, map[string]string{"missing": ""}) {
+		t.Fatal("missing policy not reported as changed")
+	}
+}
+
+func TestVoteChoicesChangedUsesTreasuryPolicy(t *testing.T) {
+	status := &ticketStatus{
+		TSpendPolicy:   map[string]string{"key": "yes"},
+		TreasuryPolicy: map[string]string{"key": "no"},
+	}
+	if !voteChoicesChanged(status, nil, nil, map[string]string{"key": "yes"}) {
+		t.Fatal("changed treasury policy not detected")
+	}
+}
+
 func TestNextJitter(t *testing.T) {
 	tests := []struct {
 		name                              string

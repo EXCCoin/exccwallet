@@ -3493,34 +3493,21 @@ func (s *votingServer) updateVSPVoteChoices(ctx context.Context, ticketHash *cha
 		err = vspClient.SetVoteChoice(ctx, ticketHash, choices, tspendPolicy, treasuryPolicy)
 		return err
 	}
-	var firstErr error
-	err := s.wallet.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
+	return s.wallet.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
 		vspHost, err := s.wallet.VSPHostForTicket(ctx, hash)
-		if err != nil && firstErr == nil {
+		if err != nil {
 			if errors.Is(err, errors.NotExist) {
 				// Ticket is not registered with a VSP, nothing more to do here.
 				return nil
 			}
-			firstErr = err
-			return nil
+			return err
 		}
 		vspClient, err := loader.LookupVSP(vspHost)
-		if err != nil && firstErr == nil {
-			firstErr = err
-			return nil
+		if err != nil {
+			return err
 		}
-		// Never return errors here, so all tickets are tried.
-		// The first error will be returned to the user.
-		err = vspClient.SetVoteChoice(ctx, hash, choices, tspendPolicy, treasuryPolicy)
-		if err != nil && firstErr == nil {
-			firstErr = err
-		}
-		return nil
+		return vspClient.SetVoteChoice(ctx, hash, choices, tspendPolicy, treasuryPolicy)
 	})
-	if err != nil {
-		return err
-	}
-	return firstErr
 }
 
 // StartMessageVerificationService starts the MessageVerification service
@@ -4193,16 +4180,9 @@ func (s *walletServer) ProcessUnmanagedTickets(ctx context.Context, req *pb.Proc
 		return nil, status.Errorf(codes.Unknown, "VSPClient instance failed to start. Error: %v", err)
 	}
 
-	errUnmanagedTickets := errors.New("unmanaged tickets")
-	err = s.wallet.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
-		_, err := s.wallet.VSPFeeHashForTicket(ctx, hash)
-		if errors.Is(err, errors.NotExist) {
-			return errUnmanagedTickets
-		}
-		return nil
-	})
-	if errors.Is(err, errUnmanagedTickets) {
-		vspClient.ProcessUnprocessedTickets(ctx, policy)
+	err = vspClient.ProcessUnprocessedTickets(ctx, policy)
+	if err != nil {
+		return nil, translateError(err)
 	}
 
 	return &pb.ProcessUnmanagedTicketsResponse{}, nil
@@ -4236,25 +4216,27 @@ func (s *walletServer) SetVspdVoteChoices(ctx context.Context, req *pb.SetVspdVo
 		return nil, status.Errorf(codes.Unknown, "VSPClient instance failed to start. Error: %v", err)
 	}
 	err = s.wallet.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
-		// Skip errors here, but should we log at least?
 		choices, _, err := s.wallet.AgendaChoices(ctx, hash)
 		if err != nil {
-			return nil
+			return err
 		}
 		ticketHost, err := s.wallet.VSPHostForTicket(ctx, hash)
 		if err != nil {
+			if errors.Is(err, errors.NotExist) {
+				return nil
+			}
 			return err
 		}
 		if ticketHost == vspHost {
 			tSpendChoices := s.wallet.TSpendPolicyForTicket(hash)
 			treasuryChoices := s.wallet.TreasuryKeyPolicyForTicket(hash)
 
-			_ = vspClient.SetVoteChoice(ctx, hash, choices, tSpendChoices, treasuryChoices)
+			return vspClient.SetVoteChoice(ctx, hash, choices, tSpendChoices, treasuryChoices)
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, status.Errorf(codes.Unknown, "ForUnspentUnexpiredTickets failed. Error: %v", err)
+		return nil, translateError(err)
 	}
 
 	return &pb.SetVspdVoteChoicesResponse{}, nil
