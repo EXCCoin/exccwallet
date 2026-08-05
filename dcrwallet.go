@@ -18,6 +18,8 @@ import (
 	"runtime/pprof"
 	"time"
 
+	"github.com/EXCCoin/exccd/addrmgr/v2"
+	"github.com/EXCCoin/exccd/wire"
 	"github.com/EXCCoin/exccwallet/v2/chain"
 	"github.com/EXCCoin/exccwallet/v2/errors"
 	ldr "github.com/EXCCoin/exccwallet/v2/internal/loader"
@@ -29,8 +31,6 @@ import (
 	"github.com/EXCCoin/exccwallet/v2/ticketbuyer"
 	"github.com/EXCCoin/exccwallet/v2/version"
 	"github.com/EXCCoin/exccwallet/v2/wallet"
-	"github.com/EXCCoin/exccd/addrmgr/v2"
-	"github.com/EXCCoin/exccd/wire"
 )
 
 func init() {
@@ -533,6 +533,7 @@ func spvLoop(ctx context.Context, w *wallet.Wallet) {
 	amgrDir := filepath.Join(cfg.AppDataDir.Value, w.ChainParams().Name)
 	amgr := addrmgr.New(amgrDir, cfg.lookup)
 	lp := p2p.NewLocalPeer(w.ChainParams(), addr, amgr)
+	lp.SetDialFunc(cfg.dial)
 	syncer := spv.NewSyncer(w, lp)
 	if len(cfg.SPVConnect) > 0 {
 		syncer.SetPersistentPeers(cfg.SPVConnect)
