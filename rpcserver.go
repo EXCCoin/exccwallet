@@ -323,7 +323,8 @@ func startRPCServers(walletLoader *loader.Loader) (*grpc.Server, *jsonrpc.Server
 				grpc.UnaryInterceptor(interceptUnary),
 			)
 			rpcserver.RegisterServices(server)
-			rpcserver.StartWalletLoaderService(server, walletLoader, activeNet)
+			rpcserver.StartWalletLoaderService(server, walletLoader, activeNet,
+				cfg.dial, cfg.lookup)
 			rpcserver.StartTicketBuyerV2Service(server, walletLoader)
 			rpcserver.StartAccountMixerService(server, walletLoader)
 			rpcserver.StartAgendaService(server, activeNet.Params)

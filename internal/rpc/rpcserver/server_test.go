@@ -6,6 +6,7 @@ package rpcserver
 
 import (
 	"context"
+	"errors"
 	"net"
 	"runtime"
 	"testing"
@@ -112,12 +113,30 @@ func TestStartServicesSynchronizeDependencies(t *testing.T) {
 
 	loaders := [2]*loader.Loader{new(loader.Loader), new(loader.Loader)}
 	activeNets := [2]*netparams.Params{new(netparams.Params), new(netparams.Params)}
+	dialErrs := [2]error{errors.New("dial 0"), errors.New("dial 1")}
+	loaderDials := [2]dialFunc{
+		func(context.Context, string, string) (net.Conn, error) {
+			return nil, dialErrs[0]
+		},
+		func(context.Context, string, string) (net.Conn, error) {
+			return nil, dialErrs[1]
+		},
+	}
+	lookupIPs := [2]net.IP{net.IPv4(192, 0, 2, 1), net.IPv4(192, 0, 2, 2)}
+	lookups := [2]func(string) ([]net.IP, error){
+		func(string) ([]net.IP, error) { return []net.IP{lookupIPs[0]}, nil },
+		func(string) ([]net.IP, error) { return []net.IP{lookupIPs[1]}, nil },
+	}
 	t.Run("loader", func(t *testing.T) {
 		testConcurrentServiceStart(t, func(i int) {
-			StartWalletLoaderService(nil, loaders[i], activeNets[i])
+			StartWalletLoaderService(nil, loaders[i], activeNets[i], loaderDials[i], lookups[i])
 		}, func(i int) bool {
+			_, dialErr := loaderService.dial(context.Background(), "tcp", "unused")
+			ips, lookupErr := loaderService.lookup("unused")
 			return loaderService.loader == loaders[i] &&
-				loaderService.activeNet == activeNets[i]
+				loaderService.activeNet == activeNets[i] &&
+				errors.Is(dialErr, dialErrs[i]) && lookupErr == nil &&
+				len(ips) == 1 && ips[0].Equal(lookupIPs[i])
 		})
 	})
 

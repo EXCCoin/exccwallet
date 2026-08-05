@@ -184,6 +184,8 @@ type loaderServer struct {
 	readyMtx  sync.RWMutex
 	loader    *loader.Loader
 	activeNet *netparams.Params
+	dial      dialFunc
+	lookup    func(string) ([]net.IP, error)
 }
 
 // seedServer provides RPC clients with the ability to generate secure random
@@ -2513,7 +2515,9 @@ func (s *walletServer) ConfirmationNotifications(svr pb.WalletService_Confirmati
 }
 
 // StartWalletLoaderService starts the WalletLoaderService.
-func StartWalletLoaderService(server *grpc.Server, loader *loader.Loader, activeNet *netparams.Params) {
+func StartWalletLoaderService(server *grpc.Server, loader *loader.Loader,
+	activeNet *netparams.Params, dial dialFunc,
+	lookup func(string) ([]net.IP, error)) {
 	loaderService.readyMtx.Lock()
 	defer loaderService.readyMtx.Unlock()
 
@@ -2524,6 +2528,8 @@ func StartWalletLoaderService(server *grpc.Server, loader *loader.Loader, active
 	loaderService.ready = true
 	loaderService.loader = loader
 	loaderService.activeNet = activeNet
+	loaderService.dial = dial
+	loaderService.lookup = lookup
 }
 
 func (s *loaderServer) checkReady() bool {
@@ -3056,8 +3062,9 @@ func (s *loaderServer) SpvSync(req *pb.SpvSyncRequest, svr pb.WalletLoaderServic
 		}
 	}
 	addr := &net.TCPAddr{IP: net.ParseIP("::1"), Port: 0}
-	amgr := addrmgr.New(s.loader.DbDirPath(), net.LookupIP) // TODO: be mindful of tor
+	amgr := addrmgr.New(s.loader.DbDirPath(), s.lookup)
 	lp := p2p.NewLocalPeer(wallet.ChainParams(), addr, amgr)
+	lp.SetDialFunc(p2p.DialFunc(s.dial))
 	var sendMu sync.Mutex
 	send := func(resp *pb.SpvSyncResponse) {
 		sendMu.Lock()
