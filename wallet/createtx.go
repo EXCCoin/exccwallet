@@ -1733,6 +1733,9 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 		// TODO: Send all tickets, and all split transactions, together.  Purge
 		// transactions from DB if tickets cannot be sent.
 		if !req.DontSignTx {
+			if err := ctx.Err(); err != nil {
+				return purchaseTicketsResponse, errors.E(op, err)
+			}
 			err = n.PublishTransactions(ctx, ticket)
 			if err != nil {
 				return purchaseTicketsResponse, errors.E(op, err)
