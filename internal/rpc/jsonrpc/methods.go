@@ -4995,6 +4995,14 @@ func (s *Server) version(ctx context.Context, icmd interface{}) (interface{}, er
 		}
 	}
 
+	resp["exccwallet"] = dcrdtypes.VersionResult{
+		VersionString: version.String(),
+		Major:         version.Major,
+		Minor:         version.Minor,
+		Patch:         version.Patch,
+		Prerelease:    version.PreRelease,
+		BuildMetadata: version.BuildMetadata,
+	}
 	resp["exccwalletjsonrpcapi"] = dcrdtypes.VersionResult{
 		VersionString: jsonrpcSemverString,
 		Major:         jsonrpcSemverMajor,
