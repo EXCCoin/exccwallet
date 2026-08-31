@@ -7,6 +7,7 @@ package vsp
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -85,6 +86,44 @@ func TestIsUnknownTicketError(t *testing.T) {
 				t.Fatalf("is unknown ticket = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestProcessManagedTicketHashesIsBounded(t *testing.T) {
+	hashes := make([]chainhash.Hash, maxConcurrentManagedTickets*2)
+	started := make(chan struct{}, len(hashes))
+	release := make(chan struct{})
+	var active, processed atomic.Int32
+	done := make(chan error, 1)
+	go func() {
+		done <- processManagedTicketHashes(hashes, func(*chainhash.Hash) error {
+			active.Add(1)
+			started <- struct{}{}
+			<-release
+			active.Add(-1)
+			processed.Add(1)
+			return nil
+		})
+	}()
+
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for range maxConcurrentManagedTickets {
+		select {
+		case <-started:
+		case <-timer.C:
+			t.Fatal("managed ticket processing did not run concurrently")
+		}
+	}
+	if got := active.Load(); got != maxConcurrentManagedTickets {
+		t.Fatalf("active workers = %d, want %d", got, maxConcurrentManagedTickets)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := processed.Load(); got != int32(len(hashes)) {
+		t.Fatalf("processed tickets = %d, want %d", got, len(hashes))
 	}
 }
 

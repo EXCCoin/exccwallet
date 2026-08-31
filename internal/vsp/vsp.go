@@ -16,6 +16,7 @@ import (
 	"github.com/EXCCoin/exccwallet/v2/errors"
 	"github.com/EXCCoin/exccwallet/v2/wallet"
 	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
+	"golang.org/x/sync/errgroup"
 )
 
 type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -183,8 +184,31 @@ func (c *Client) RecoverManagedTickets(ctx context.Context, policy Policy) error
 	return c.processManagedTickets(ctx, policy, false)
 }
 
+const maxConcurrentManagedTickets = 8
+
+func processManagedTicketHashes(hashes []chainhash.Hash,
+	process func(*chainhash.Hash) error) error {
+
+	var group errgroup.Group
+	group.SetLimit(maxConcurrentManagedTickets)
+	for i := range hashes {
+		hash := &hashes[i]
+		group.Go(func() error { return process(hash) })
+	}
+	return group.Wait()
+}
+
 func (c *Client) processManagedTickets(ctx context.Context, policy Policy, localOnly bool) error {
+	var hashes []chainhash.Hash
 	err := c.Wallet.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
+		hashes = append(hashes, *hash)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return processManagedTicketHashes(hashes, func(hash *chainhash.Hash) error {
 		// We only want to process tickets that haven't been confirmed yet.
 		confirmed, err := c.Wallet.IsVSPTicketConfirmed(ctx, hash)
 		skip, err := skipManagedTicket(confirmed, err, localOnly)
@@ -240,7 +264,6 @@ func (c *Client) processManagedTickets(ctx context.Context, policy Policy, local
 
 		return nil
 	})
-	return err
 }
 
 // Process begins processing a VSP fee payment for a ticket.  If feeTx contains
