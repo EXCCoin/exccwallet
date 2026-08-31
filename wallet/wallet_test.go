@@ -63,6 +63,16 @@ func TestSetPreciseTicketStatusesBatches(t *testing.T) {
 	}
 }
 
+func TestMaximumRelayableTxSize(t *testing.T) {
+	if got := maximumRelayableTxSize(chaincfg.MainNetParams()); got != maxStandardTxSize {
+		t.Fatalf("mainnet maximum = %d, want %d", got, maxStandardTxSize)
+	}
+	params := chaincfg.TestNet3Params()
+	if got := maximumRelayableTxSize(params); got != params.MaxTxSize {
+		t.Fatalf("testnet maximum = %d, want %d", got, params.MaxTxSize)
+	}
+}
+
 func TestCurrentAgendas(t *testing.T) {
 	version, agendas := CurrentAgendas(chaincfg.MainNetParams())
 	if version != 11 {

@@ -58,6 +58,13 @@ const (
 		txscript.ScriptVerifyTreasury
 )
 
+func maximumRelayableTxSize(params *chaincfg.Params) int {
+	if params.Net == wire.MainNet {
+		return maxStandardTxSize
+	}
+	return params.MaxTxSize
+}
+
 func checkTicketPrice(spendLimit, ticketPrice dcrutil.Amount) error {
 	if spendLimit > 0 && ticketPrice > spendLimit {
 		return errors.E(errors.Invalid,
@@ -159,7 +166,7 @@ func (w *Wallet) NewUnsignedTransaction(ctx context.Context, outputs []*wire.TxO
 
 		var err error
 		authoredTx, err = txauthor.NewUnsignedTransaction(outputs, relayFeePerKb,
-			inputSource, changeSource, w.chainParams.MaxTxSize)
+			inputSource, changeSource, maximumRelayableTxSize(w.chainParams))
 		if err != nil {
 			return err
 		}
@@ -785,10 +792,7 @@ func (w *Wallet) compressWalletInternal(ctx context.Context, op errors.Op, dbtx 
 	})
 	// Mainnet further restricts protocol-valid transaction sizes through
 	// standardness rules.
-	maximumTxSize := w.chainParams.MaxTxSize
-	if w.chainParams.Net == wire.MainNet {
-		maximumTxSize = maxStandardTxSize
-	}
+	maximumTxSize := maximumRelayableTxSize(w.chainParams)
 
 	// Add the txins using all the eligible outputs.
 	totalAdded := dcrutil.Amount(0)
