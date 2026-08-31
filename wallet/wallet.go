@@ -2916,8 +2916,8 @@ const (
 	TicketStatusRevoked // revoked
 )
 
-func makeTicketSummary(ctx context.Context, rpc *dcrd.RPC, dbtx walletdb.ReadTx,
-	w *Wallet, details *udb.TicketDetails) *TicketSummary {
+func makeTicketSummaryBase(dbtx walletdb.ReadTx, w *Wallet,
+	details *udb.TicketDetails) *TicketSummary {
 
 	ticketHeight := details.Ticket.Height()
 	_, tipHeight := w.txStore.MainChainTip(dbtx)
@@ -2926,9 +2926,6 @@ func makeTicketSummary(ctx context.Context, rpc *dcrd.RPC, dbtx walletdb.ReadTx,
 	summary := &TicketSummary{
 		Ticket: &ticketTransactionDetails,
 		Status: TicketStatusLive,
-	}
-	if rpc == nil {
-		summary.Status = TicketStatusUnspent
 	}
 	// Check if ticket is unmined or immature
 	switch {
@@ -2951,29 +2948,51 @@ func makeTicketSummary(ctx context.Context, rpc *dcrd.RPC, dbtx walletdb.ReadTx,
 		return summary
 	}
 
-	if rpc != nil && summary.Status == TicketStatusLive {
-		// In RPC mode, find if unspent ticket was expired or missed.
-		hashes := []*chainhash.Hash{&details.Ticket.Hash}
-		live, expired, err := rpc.ExistsLiveExpiredTickets(ctx, hashes)
-		switch {
-		case err != nil:
-			log.Errorf("Unable to check if ticket was live "+
-				"for ticket status: %v", &details.Ticket.Hash)
+	return summary
+}
+
+func setPreciseTicketStatuses(ctx context.Context, rpc *dcrd.RPC,
+	summaries []*TicketSummary, hashes []*chainhash.Hash) {
+
+	live, expired, err := rpc.ExistsLiveExpiredTickets(ctx, hashes)
+	if err != nil {
+		log.Errorf("Unable to check %d tickets for ticket status: %v",
+			len(hashes), err)
+		for _, summary := range summaries {
 			summary.Status = TicketStatusUnknown
-		case expired.Get(0):
+		}
+		return
+	}
+	for i, summary := range summaries {
+		switch {
+		case expired.Get(i):
 			summary.Status = TicketStatusExpired
-		case !live.Get(0):
+		case !live.Get(i):
 			summary.Status = TicketStatusMissed
 		}
-	} else if rpc == nil {
-		// In SPV mode, use expired status when the ticket is certainly
-		// past the expiry period (even though it is possible that the
-		// ticket was missed rather than expiring).
-		if ticketExpired(w.chainParams, ticketHeight, tipHeight) {
-			summary.Status = TicketStatusExpired
-		}
+	}
+}
+
+func makeTicketSummary(ctx context.Context, rpc *dcrd.RPC, dbtx walletdb.ReadTx,
+	w *Wallet, details *udb.TicketDetails) *TicketSummary {
+
+	summary := makeTicketSummaryBase(dbtx, w, details)
+	if summary.Status != TicketStatusLive {
+		return summary
+	}
+	if rpc != nil {
+		setPreciseTicketStatuses(ctx, rpc, []*TicketSummary{summary},
+			[]*chainhash.Hash{summary.Ticket.Hash})
+		return summary
 	}
 
+	// In SPV mode, use expired status when the ticket is certainly past the
+	// expiry period (even though it may have been missed rather than expired).
+	summary.Status = TicketStatusUnspent
+	_, tipHeight := w.txStore.MainChainTip(dbtx)
+	if ticketExpired(w.chainParams, details.Ticket.Height(), tipHeight) {
+		summary.Status = TicketStatusExpired
+	}
 	return summary
 }
 
@@ -3163,6 +3182,8 @@ func (w *Wallet) GetTicketsPrecise(ctx context.Context, rpcCaller Caller,
 
 		rangeFn := func(details []udb.TxDetails) (bool, error) {
 			tickets := make([]*TicketSummary, 0, len(details))
+			precise := make([]*TicketSummary, 0, len(details))
+			hashes := make([]*chainhash.Hash, 0, len(details))
 
 			for i := range details {
 				ticketInfo, err := w.txStore.TicketDetails(txmgrNs, &details[i])
@@ -3174,12 +3195,19 @@ func (w *Wallet) GetTicketsPrecise(ctx context.Context, rpcCaller Caller,
 				if ticketInfo == nil {
 					continue
 				}
-				summary := makeTicketSummary(ctx, rpc, dbtx, w, ticketInfo)
+				summary := makeTicketSummaryBase(dbtx, w, ticketInfo)
 				tickets = append(tickets, summary)
+				if summary.Status == TicketStatusLive {
+					precise = append(precise, summary)
+					hashes = append(hashes, summary.Ticket.Hash)
+				}
 			}
 
 			if len(tickets) == 0 {
 				return false, nil
+			}
+			if len(precise) != 0 {
+				setPreciseTicketStatuses(ctx, rpc, precise, hashes)
 			}
 
 			if details[0].Block.Height == -1 {

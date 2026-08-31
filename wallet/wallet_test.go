@@ -5,14 +5,63 @@
 package wallet
 
 import (
+	"context"
 	"encoding/hex"
+	"encoding/json"
 	"math"
 	"testing"
 
+	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
 	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/rpc/client/dcrd"
 )
+
+type ticketStatusCaller struct {
+	batches chan int
+}
+
+func (c *ticketStatusCaller) Call(_ context.Context, method string,
+	result interface{}, args ...interface{}) error {
+
+	var hashes []string
+	if err := json.Unmarshal(args[0].(json.RawMessage), &hashes); err != nil {
+		return err
+	}
+	c.batches <- len(hashes)
+	if method == "existslivetickets" {
+		*result.(*string) = "01"
+	} else {
+		*result.(*string) = "02"
+	}
+	return nil
+}
+
+func TestSetPreciseTicketStatusesBatches(t *testing.T) {
+	t.Parallel()
+	summaries := []*TicketSummary{{Status: TicketStatusLive},
+		{Status: TicketStatusLive}, {Status: TicketStatusLive}}
+	hashes := []*chainhash.Hash{{1}, {2}, {3}}
+	caller := &ticketStatusCaller{batches: make(chan int, 2)}
+
+	setPreciseTicketStatuses(context.Background(), dcrd.New(caller),
+		summaries, hashes)
+
+	for range 2 {
+		if got := <-caller.batches; got != len(hashes) {
+			t.Fatalf("ticket status batch size = %d, want %d", got, len(hashes))
+		}
+	}
+	want := []TicketStatus{TicketStatusLive, TicketStatusExpired,
+		TicketStatusMissed}
+	for i := range summaries {
+		if summaries[i].Status != want[i] {
+			t.Errorf("ticket %d status = %v, want %v", i,
+				summaries[i].Status, want[i])
+		}
+	}
+}
 
 func TestCurrentAgendas(t *testing.T) {
 	version, agendas := CurrentAgendas(chaincfg.MainNetParams())
