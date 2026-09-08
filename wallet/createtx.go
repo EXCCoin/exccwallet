@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/binary"
+	stderrors "errors"
 	"net"
 	"sort"
 	"time"
@@ -1222,7 +1223,7 @@ var errVSPFeeRequiresUTXOSplit = errors.New("paying VSP fee requires UTXO split"
 // greater than or equal to 0, tickets that cost more than that limit will
 // return an error that not enough funds are available.
 func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
-	n NetworkBackend, req *PurchaseTicketsRequest) (*PurchaseTicketsResponse, error) {
+	n NetworkBackend, req *PurchaseTicketsRequest) (response *PurchaseTicketsResponse, resultErr error) {
 	// Ensure the minimum number of required confirmations is positive.
 	if req.MinConf < 0 {
 		return nil, errors.E(op, errors.Invalid, "negative minconf")
@@ -1555,6 +1556,41 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 	}
 
 	purchaseTicketsResponse := &PurchaseTicketsResponse{}
+	defer func() {
+		if len(purchaseTicketsResponse.TicketHashes) == 0 {
+			return
+		}
+		response = purchaseTicketsResponse
+		if req.DontSignTx || req.VSPFeePaymentProcess == nil {
+			return
+		}
+		unlockCredits = false
+		for i, ticketHash := range purchaseTicketsResponse.TicketHashes {
+			result := &purchaseTicketsResponse.Results[i]
+			result.VSPAttempted = true
+			feeTx := wire.NewMsgTx()
+			for j := range vspFeeCredits[i] {
+				in := &vspFeeCredits[i][j]
+				feeTx.AddTxIn(wire.NewTxIn(&in.OutPoint, in.PrevOut.Value, nil))
+			}
+			err := req.VSPFeePaymentProcess(ctx, ticketHash, feeTx)
+			if err == nil {
+				_, err = udb.NewTxRecordFromMsgTx(feeTx, time.Now())
+			}
+			result.VSPError = err
+			if err != nil {
+				resultErr = stderrors.Join(resultErr, err)
+				for _, outpoint := range vspFeeCredits[i] {
+					w.UnlockOutpoint(&outpoint.OutPoint.Hash, outpoint.OutPoint.Index)
+				}
+			}
+		}
+		for _, credits := range vspFeeCredits[len(purchaseTicketsResponse.TicketHashes):] {
+			for _, input := range credits {
+				w.UnlockOutpoint(&input.OutPoint.Hash, input.OutPoint.Index)
+			}
+		}
+	}()
 	var splitTx *wire.MsgTx
 	var splitOutputIndexes []int
 	for {
@@ -1609,8 +1645,6 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 	}
 
 	// Create each ticket.
-	ticketHashes := make([]*chainhash.Hash, 0, req.Count)
-	tickets := make([]*wire.MsgTx, 0, req.Count)
 	outpoint := wire.OutPoint{Hash: splitTx.TxHash()}
 	for _, index := range splitOutputIndexes {
 		// Generate the extended outpoints that we need to use for ticket
@@ -1683,13 +1717,6 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 			// Set the expiry.
 			ticket.Expiry = uint32(req.Expiry)
 
-			ticketHash := ticket.TxHash()
-			ticketHashes = append(ticketHashes, &ticketHash)
-			tickets = append(tickets, ticket)
-
-			purchaseTicketsResponse.Tickets = tickets
-			purchaseTicketsResponse.TicketHashes = ticketHashes
-
 			if req.DontSignTx {
 				return nil
 			}
@@ -1736,43 +1763,24 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 		if err != nil {
 			return purchaseTicketsResponse, errors.E(op, err)
 		}
-		// TODO: Send all tickets, and all split transactions, together.  Purge
-		// transactions from DB if tickets cannot be sent.
+		hash := ticket.TxHash()
+		purchaseTicketsResponse.Results = append(purchaseTicketsResponse.Results, TicketPurchaseResult{TicketHash: hash})
+		result := &purchaseTicketsResponse.Results[len(purchaseTicketsResponse.Results)-1]
 		if !req.DontSignTx {
 			if err := ctx.Err(); err != nil {
+				result.PublicationError = err
 				return purchaseTicketsResponse, errors.E(op, err)
 			}
 			err = n.PublishTransactions(ctx, ticket)
 			if err != nil {
+				result.PublicationError = err
 				return purchaseTicketsResponse, errors.E(op, err)
 			}
+			result.Published = true
 			log.Infof("Published ticket purchase %v", ticket.TxHash())
 		}
-	}
-
-	if !req.DontSignTx && req.VSPFeePaymentProcess != nil {
-		unlockCredits = false
-		for i, ticketHash := range purchaseTicketsResponse.TicketHashes {
-			feeTx := wire.NewMsgTx()
-			for j := range vspFeeCredits[i] {
-				in := &vspFeeCredits[i][j]
-				feeTx.AddTxIn(wire.NewTxIn(&in.OutPoint, in.PrevOut.Value, nil))
-			}
-
-			err = req.VSPFeePaymentProcess(ctx, ticketHash, feeTx)
-			if err != nil {
-				// unlock outpoints in case of error
-				for _, outpoint := range vspFeeCredits[i] {
-					w.UnlockOutpoint(&outpoint.OutPoint.Hash, outpoint.OutPoint.Index)
-				}
-				continue
-			}
-			// watch for outpoints change.
-			_, err = udb.NewTxRecordFromMsgTx(feeTx, time.Now())
-			if err != nil {
-				return nil, err
-			}
-		}
+		purchaseTicketsResponse.Tickets = append(purchaseTicketsResponse.Tickets, ticket)
+		purchaseTicketsResponse.TicketHashes = append(purchaseTicketsResponse.TicketHashes, &hash)
 	}
 
 	return purchaseTicketsResponse, err

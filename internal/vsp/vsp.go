@@ -1,13 +1,14 @@
 package vsp
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
+	stderrors "errors"
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"sync"
+	"time"
 
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
@@ -41,8 +42,12 @@ type Client struct {
 	Policy Policy
 	*client
 
-	mu   sync.Mutex
-	jobs map[chainhash.Hash]*feePayment
+	mu            sync.Mutex
+	jobs          map[chainhash.Hash]*feePayment
+	jobGeneration map[chainhash.Hash]uint64
+	ctx           context.Context
+	cancel        context.CancelFunc
+	closed        bool
 }
 
 type Config struct {
@@ -64,11 +69,7 @@ type Config struct {
 }
 
 func New(cfg Config) (*Client, error) {
-	u, err := url.Parse(cfg.URL)
-	if err != nil {
-		return nil, err
-	}
-	pubKey, err := base64.StdEncoding.DecodeString(cfg.PubKey)
+	host, pubKey, err := ParseVSPIdentity(cfg.URL, cfg.PubKey)
 	if err != nil {
 		return nil, err
 	}
@@ -76,16 +77,20 @@ func New(cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("wallet option not set")
 	}
 
-	client := newClient(u.String(), pubKey, cfg.Wallet)
+	client := newClient(host, pubKey, cfg.Wallet)
 	client.Transport = &http.Transport{
 		DialContext: cfg.Dialer,
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	v := &Client{
-		Wallet: cfg.Wallet,
-		Policy: cfg.Policy,
-		client: client,
-		jobs:   make(map[chainhash.Hash]*feePayment),
+		Wallet:        cfg.Wallet,
+		Policy:        cfg.Policy,
+		client:        client,
+		jobs:          make(map[chainhash.Hash]*feePayment),
+		jobGeneration: make(map[chainhash.Hash]uint64),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 	return v, nil
 }
@@ -157,16 +162,6 @@ func (c *Client) ProcessTicket(ctx context.Context, hash *chainhash.Hash) error 
 	return nil
 }
 
-func skipManagedTicket(confirmed bool, err error, localOnly bool) (bool, error) {
-	if err != nil {
-		if errors.Is(err, errors.NotExist) {
-			return localOnly, nil
-		}
-		return false, err
-	}
-	return confirmed, nil
-}
-
 func isUnknownTicketError(err error) bool {
 	var apiErr *BadRequestError
 	return errors.As(err, &apiErr) && apiErr.Code == codeUnknownTicket
@@ -174,14 +169,45 @@ func isUnknownTicketError(err error) bool {
 
 // ProcessManagedTickets resumes locally associated tickets at the VSP.
 func (c *Client) ProcessManagedTickets(ctx context.Context, policy Policy) error {
-	return c.processManagedTickets(ctx, policy, true)
+	_, err := c.processManagedTickets(ctx, policy, true)
+	return err
 }
 
 // RecoverManagedTickets discovers tickets previously registered with a VSP.
 // This recovers tracking after seed restores and only considers unspent and
 // unexpired tickets.
 func (c *Client) RecoverManagedTickets(ctx context.Context, policy Policy) error {
+	_, err := c.RecoverManagedTicketsWithResults(ctx, policy)
+	return err
+}
+
+type ManagedTicketStatus string
+
+const (
+	ManagedTicketStarted        ManagedTicketStatus = "started"
+	ManagedTicketAlreadyTracked ManagedTicketStatus = "already_tracked"
+	ManagedTicketConfirmed      ManagedTicketStatus = "confirmed"
+	ManagedTicketUnknownToVSP   ManagedTicketStatus = "unknown_to_vsp"
+	ManagedTicketNotManaged     ManagedTicketStatus = "not_managed"
+	ManagedTicketDifferentVSP   ManagedTicketStatus = "different_vsp"
+	ManagedTicketFailed         ManagedTicketStatus = "failed"
+)
+
+type ManagedTicketResult struct {
+	TicketHash chainhash.Hash
+	Status     ManagedTicketStatus
+	Err        error
+}
+
+// RecoverManagedTicketsWithResults preserves each result even when another
+// ticket fails. An empty result list with an error means discovery failed.
+func (c *Client) RecoverManagedTicketsWithResults(ctx context.Context, policy Policy) ([]ManagedTicketResult, error) {
 	return c.processManagedTickets(ctx, policy, false)
+}
+
+func (c *Client) sameProvider(host string, pubkey []byte) bool {
+	canonical, err := CanonicalVSPHost(host)
+	return err == nil && canonical == c.client.url && bytes.Equal(pubkey, c.client.pub)
 }
 
 const maxConcurrentManagedTickets = 8
@@ -198,31 +224,63 @@ func processManagedTicketHashes(hashes []chainhash.Hash,
 	return group.Wait()
 }
 
-func (c *Client) processManagedTickets(ctx context.Context, policy Policy, localOnly bool) error {
+func (c *Client) processManagedTickets(ctx context.Context, policy Policy, localOnly bool) ([]ManagedTicketResult, error) {
 	var hashes []chainhash.Hash
 	err := c.Wallet.ForUnspentUnexpiredTickets(ctx, func(hash *chainhash.Hash) error {
 		hashes = append(hashes, *hash)
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	return processManagedTicketHashes(hashes, func(hash *chainhash.Hash) error {
-		// We only want to process tickets that haven't been confirmed yet.
-		confirmed, err := c.Wallet.IsVSPTicketConfirmed(ctx, hash)
-		skip, err := skipManagedTicket(confirmed, err, localOnly)
-		if err != nil {
-			return err
+	unmined, err := c.Wallet.UnminedVSPTickets(ctx, c.sameProvider)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[chainhash.Hash]bool, len(hashes))
+	for _, hash := range hashes {
+		seen[hash] = true
+	}
+	for _, hash := range unmined {
+		if !seen[hash] {
+			hashes = append(hashes, hash)
+			seen[hash] = true
 		}
-		if skip {
-			return nil
+	}
+	results := make([]ManagedTicketResult, len(hashes))
+	indices := make(map[chainhash.Hash]int, len(hashes))
+	for i, hash := range hashes {
+		indices[hash] = i
+	}
+	err = processManagedTicketHashes(hashes, func(hash *chainhash.Hash) (err error) {
+		result := &results[indices[*hash]]
+		result.TicketHash = *hash
+		result.Status = ManagedTicketFailed
+		defer func() { result.Err = err }()
+		info, err := c.Wallet.VSPTicketInfo(ctx, hash)
+		if errors.Is(err, errors.NotExist) {
+			if localOnly {
+				result.Status = ManagedTicketNotManaged
+				return nil
+			}
+		} else if err != nil {
+			return err
+		} else {
+			if info.Host != "" && !c.sameProvider(info.Host, info.PubKey) {
+				result.Status = ManagedTicketDifferentVSP
+				return nil
+			}
+			if udb.FeeStatus(info.FeeTxStatus) == udb.VSPFeeProcessConfirmed {
+				result.Status = ManagedTicketConfirmed
+				return nil
+			}
 		}
 		c.mu.Lock()
 		_, ok := c.jobs[*hash]
 		c.mu.Unlock()
 		if ok {
 			// Already processing this ticket with the VSP.
+			result.Status = ManagedTicketAlreadyTracked
 			return nil
 		}
 
@@ -232,11 +290,13 @@ func (c *Client) processManagedTickets(ctx context.Context, policy Policy, local
 		status, err := c.status(ctx, hash)
 		if err != nil {
 			if isUnknownTicketError(err) {
+				result.Status = ManagedTicketUnknownToVSP
 				return nil
 			}
 			return err
 		}
 
+		var fp *feePayment
 		if status.FeeTxStatus == "confirmed" {
 			feeHash, err := chainhash.NewHashFromStr(status.FeeTxHash)
 			if err != nil {
@@ -246,6 +306,7 @@ func (c *Client) processManagedTickets(ctx context.Context, policy Policy, local
 			if err != nil {
 				return err
 			}
+			result.Status = ManagedTicketConfirmed
 			return nil
 		} else if status.FeeTxHash != "" {
 			feeHash, err := chainhash.NewHashFromStr(status.FeeTxHash)
@@ -256,14 +317,27 @@ func (c *Client) processManagedTickets(ctx context.Context, policy Policy, local
 			if err != nil {
 				return err
 			}
-			_ = c.feePayment(hash, policy, true)
+			fp = c.feePayment(hash, policy, true)
 		} else {
 			// Fee hasn't been paid at the provided VSP, so this should do that if needed.
-			_ = c.feePayment(hash, policy, false)
+			fp = c.feePayment(hash, policy, false)
 		}
-
+		if fp == nil {
+			return fmt.Errorf("fee payment cannot be processed")
+		}
+		fp.mu.Lock()
+		blocked, failure := fp.blocked, fp.err
+		fp.mu.Unlock()
+		if blocked {
+			if failure != nil {
+				return failure
+			}
+			return errMissingFee
+		}
+		result.Status = ManagedTicketStarted
 		return nil
 	})
+	return results, err
 }
 
 // Process begins processing a VSP fee payment for a ticket.  If feeTx contains
@@ -311,9 +385,9 @@ func (c *Client) ProcessWithPolicy(ctx context.Context, ticketHash *chainhash.Ha
 		fp.mu.Unlock()
 		err := fp.receiveFeeAddress()
 		if err != nil {
-			err := c.Wallet.UpdateVspTicketFeeToErrored(ctx, ticketHash, c.client.url, c.client.pub)
-			if err != nil {
-				return err
+			updateErr := c.Wallet.UpdateVspTicketFeeToErrored(ctx, ticketHash, c.client.url, c.client.pub)
+			if updateErr != nil {
+				return stderrors.Join(err, updateErr)
 			}
 			// XXX, retry? (old Process retried)
 			// but this may not be necessary any longer as the parent of
@@ -322,16 +396,16 @@ func (c *Client) ProcessWithPolicy(ctx context.Context, ticketHash *chainhash.Ha
 		}
 		err = fp.makeFeeTx(feeTx)
 		if err != nil {
-			err := c.Wallet.UpdateVspTicketFeeToErrored(ctx, ticketHash, c.client.url, c.client.pub)
-			if err != nil {
-				return err
+			updateErr := c.Wallet.UpdateVspTicketFeeToErrored(ctx, ticketHash, c.client.url, c.client.pub)
+			if updateErr != nil {
+				return stderrors.Join(err, updateErr)
 			}
 			return err
 		}
 		return fp.submitPayment()
 	case udb.VSPFeeProcessPaid:
 		// If a VSP ticket has been paid, but confirm payment.
-		if len(vspTicket.Host) > 0 && vspTicket.Host != c.client.url {
+		if len(vspTicket.Host) > 0 && !c.sameProvider(vspTicket.Host, vspTicket.PubKey) {
 			// Cannot confirm a paid ticket that is already with another VSP.
 			return fmt.Errorf("ticket already paid or confirmed with another vsp")
 		}
@@ -413,8 +487,10 @@ type TicketInfo struct {
 	State          uint32
 	Fee            dcrutil.Amount
 	FeeHash        chainhash.Hash
-
-	// TODO: include stuff returned by the status() call?
+	Phase          string
+	LastError      string
+	NeedsUnlock    bool
+	NextRetry      time.Time
 }
 
 // TrackedTickets returns information about all outstanding tickets tracked by
@@ -434,15 +510,26 @@ func (c *Client) TrackedTickets() []*TicketInfo {
 	tickets := make([]*TicketInfo, 0, len(jobs))
 	for _, job := range jobs {
 		job.mu.Lock()
-		tickets = append(tickets, &TicketInfo{
+		info := &TicketInfo{
 			TicketHash:     job.ticketHash,
 			CommitmentAddr: job.commitmentAddr,
 			VotingAddr:     job.votingAddr,
 			State:          uint32(job.state),
 			Fee:            job.fee,
 			FeeHash:        job.feeHash,
-		})
+			NeedsUnlock:    errors.Is(job.err, errors.Locked),
+		}
+		if job.err != nil {
+			info.LastError = job.err.Error()
+		} else if job.blocked {
+			info.LastError = errMissingFee.Error()
+		}
 		job.mu.Unlock()
+		job.timerMu.Lock()
+		info.Phase = job.phase
+		info.NextRetry = job.nextRetry
+		job.timerMu.Unlock()
+		tickets = append(tickets, info)
 	}
 
 	return tickets

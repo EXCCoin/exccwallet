@@ -8,10 +8,91 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 )
+
+const (
+	vspRequestTimeout   = 15 * time.Second
+	maxVSPResponseBytes = 4 << 20
+)
+
+// CanonicalVSPHost validates and normalizes a provider's HTTPS base URL.
+func CanonicalVSPHost(host string) (string, error) {
+	u, err := url.Parse(host)
+	if err != nil {
+		return "", fmt.Errorf("invalid VSP URL: %w", err)
+	}
+	if !strings.EqualFold(u.Scheme, "https") || u.Hostname() == "" ||
+		u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
+		u.RawFragment != "" || u.Opaque != "" || strings.Contains(host, "#") ||
+		strings.HasSuffix(u.Host, ":") {
+		return "", fmt.Errorf("VSP URL must use HTTPS without credentials, query, or fragment")
+	}
+	hostname := strings.ToLower(u.Hostname())
+	u.Host = strings.ToLower(u.Host)
+	if port := u.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("invalid VSP port")
+		}
+		u.Host = net.JoinHostPort(hostname, strconv.Itoa(n))
+		if n == 443 {
+			u.Host = hostname
+			if strings.Contains(hostname, ":") {
+				u.Host = "[" + hostname + "]"
+			}
+		}
+	}
+	u.Scheme = "https"
+	if u.RawPath == "" {
+		u.Path = strings.TrimRight(u.Path, "/")
+	} else {
+		u.RawPath = strings.TrimRight(u.RawPath, "/")
+		u.Path, _ = url.PathUnescape(u.RawPath)
+	}
+	return u.String(), nil
+}
+
+// ParseVSPIdentity validates a provider URL and canonical Ed25519 public key.
+func ParseVSPIdentity(host, encodedKey string) (string, []byte, error) {
+	host, err := CanonicalVSPHost(host)
+	if err != nil {
+		return "", nil, err
+	}
+	key, err := base64.StdEncoding.Strict().DecodeString(encodedKey)
+	if err != nil || len(key) != ed25519.PublicKeySize ||
+		base64.StdEncoding.EncodeToString(key) != encodedKey {
+		return "", nil, fmt.Errorf("VSP public key must be a canonical base64 Ed25519 public key")
+	}
+	return host, key, nil
+}
+
+func vspRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) == 0 || len(via) > 3 {
+		return fmt.Errorf("too many VSP redirects")
+	}
+	first := via[0].URL
+	next := req.URL
+	port := func(u *url.URL) string {
+		if p := u.Port(); p != "" {
+			n, _ := strconv.Atoi(p)
+			return strconv.Itoa(n)
+		}
+		return "443"
+	}
+	if next.Scheme != "https" || next.User != nil || next.Fragment != "" ||
+		!strings.EqualFold(next.Hostname(), first.Hostname()) || port(next) != port(first) {
+		return fmt.Errorf("VSP redirect must stay on the same HTTPS provider")
+	}
+	return nil
+}
 
 type client struct {
 	http.Client
@@ -25,7 +106,10 @@ type signer interface {
 }
 
 func newClient(url string, pub []byte, s signer) *client {
-	return &client{url: url, pub: pub, sign: s.SignMessage}
+	return &client{
+		Client: http.Client{Timeout: vspRequestTimeout, CheckRedirect: vspRedirect},
+		url:    url, pub: pub, sign: s.SignMessage,
+	}
 }
 
 type BadRequestError struct {
@@ -45,6 +129,11 @@ func (c *client) get(ctx context.Context, path string, resp interface{}) error {
 }
 
 func (c *client) do(ctx context.Context, method, path string, addr stdaddr.Address, resp, req interface{}) error {
+	ctx, cancel := context.WithTimeout(ctx, vspRequestTimeout)
+	defer cancel()
+	if len(c.pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid VSP Ed25519 public key length")
+	}
 	var reqBody io.Reader
 	var sig []byte
 	if method == "POST" {
@@ -86,9 +175,12 @@ func (c *client) do(ctx context.Context, method, path string, addr stdaddr.Addre
 	if err != nil {
 		return fmt.Errorf("cannot authenticate server: %w", err)
 	}
-	respBody, err := io.ReadAll(reply.Body)
+	respBody, err := io.ReadAll(io.LimitReader(reply.Body, maxVSPResponseBytes+1))
 	if err != nil {
 		return fmt.Errorf("read response body: %w", err)
+	}
+	if len(respBody) > maxVSPResponseBytes {
+		return fmt.Errorf("VSP response exceeds %d bytes", maxVSPResponseBytes)
 	}
 	if !ed25519.Verify(c.pub, respBody, sig) {
 		return fmt.Errorf("cannot authenticate server: invalid signature")

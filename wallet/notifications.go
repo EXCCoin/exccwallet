@@ -10,10 +10,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/internal/compat"
-	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
-	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 	"github.com/EXCCoin/exccd/blockchain/stake/v4"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
@@ -21,6 +17,10 @@ import (
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 	"github.com/EXCCoin/exccd/txscript/v4/stdscript"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/internal/compat"
+	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 )
 
 // TODO: It would be good to send errors during notification creation to the rpc
@@ -46,6 +46,8 @@ type NotificationServer struct {
 	tipChangedClients         []chan *MainTipChangedNotification
 	confClients               []*ConfirmationNotificationsClient
 	removedTransactionClients []chan *RemovedTransactionNotification
+	walletStateClients        map[chan struct{}]struct{}
+	walletStateMu             sync.Mutex
 	mu                        sync.Mutex // Only protects registered clients
 	wallet                    *Wallet    // smells like hacks
 }

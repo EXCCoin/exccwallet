@@ -29,6 +29,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/EXCCoin/exccd/addrmgr/v2"
@@ -54,6 +55,7 @@ import (
 	pb "github.com/EXCCoin/exccwallet/v2/rpc/walletrpc"
 	"github.com/EXCCoin/exccwallet/v2/spv"
 	"github.com/EXCCoin/exccwallet/v2/ticketbuyer"
+	"github.com/EXCCoin/exccwallet/v2/version"
 	"github.com/EXCCoin/exccwallet/v2/wallet"
 	"github.com/EXCCoin/exccwallet/v2/wallet/txauthor"
 	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
@@ -63,9 +65,9 @@ import (
 
 // Public API version constants
 const (
-	semverString = "7.16.0"
+	semverString = "7.17.0"
 	semverMajor  = 7
-	semverMinor  = 16
+	semverMinor  = 17
 	semverPatch  = 0
 )
 
@@ -80,11 +82,29 @@ const scriptVersionAssumed = 0
 // known errors.  Any RPC handler not returning a gRPC error (with status.Errorf)
 // should return this result instead.
 func translateError(err error) error {
+	if err == nil {
+		return nil
+	}
 	code := errorCode(err)
+	if s, ok := status.FromError(err); ok && s.Code() == code {
+		return s.Err()
+	}
 	return status.Errorf(code, "%s", err.Error())
 }
 
 func errorCode(err error) codes.Code {
+	if err == nil {
+		return codes.OK
+	}
+	if errors.Is(err, context.Canceled) {
+		return codes.Canceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return codes.DeadlineExceeded
+	}
+	if s, ok := status.FromError(err); ok {
+		return s.Code()
+	}
 	var kind errors.Kind
 	if errors.As(err, &kind) {
 		switch kind {
@@ -122,13 +142,7 @@ func errorCode(err error) codes.Code {
 	if errors.Is(err, hdkeychain.ErrInvalidSeedLen) {
 		return codes.InvalidArgument
 	}
-	if errors.Is(errors.Cause(err), context.Canceled) {
-		return codes.Canceled
-	}
-	if code := status.Code(errors.Cause(err)); code != codes.OK && code != codes.Unknown {
-		return code
-	}
-	return codes.Unknown
+	return transportErrorCode(err)
 }
 
 // decodeAddress decodes an address and verifies it is intended for the active
@@ -204,9 +218,13 @@ type accountMixerServer struct {
 // ticketbuyerServer provides RPC clients with the ability to start/stop the
 // automatic ticket buyer service.
 type ticketbuyerV2Server struct {
-	ready    bool
-	readyMtx sync.RWMutex
-	loader   *loader.Loader
+	ready     bool
+	readyMtx  sync.RWMutex
+	loader    *loader.Loader
+	runMu     sync.Mutex
+	run       *ticketBuyerRun
+	nextRunID uint64
+	closing   bool
 }
 
 type agendaServer struct {
@@ -311,6 +329,8 @@ func (*versionServer) Version(ctx context.Context, req *pb.VersionRequest) (*pb.
 		Major:         semverMajor,
 		Minor:         semverMinor,
 		Patch:         semverPatch,
+		DaemonVersion: version.String(),
+		Capabilities:  []string{"vsp-status", "vsp-process-results", "ticket-purchase-results", "wallet-state", "ticket-buyer-stop", "subscription-ready"},
 	}, nil
 }
 
@@ -1897,9 +1917,10 @@ func (s *walletServer) PurchaseTickets(ctx context.Context,
 	}
 
 	ticketsResponse, err := s.wallet.PurchaseTickets(ctx, n, request)
-	if err != nil {
+	if err != nil && (ticketsResponse == nil || len(ticketsResponse.TicketHashes) == 0 || dontSignTx) {
 		return nil, err
 	}
+	purchaseErr := err
 	ticketsTx := ticketsResponse.Tickets
 	splitTx := ticketsResponse.SplitTx
 
@@ -1923,11 +1944,29 @@ func (s *walletServer) PurchaseTickets(ctx context.Context,
 	splitTxBytes := splitTxBuf.Bytes()
 	hashesBytes := marshalHashes(ticketsResponse.TicketHashes)
 
-	return &pb.PurchaseTicketsResponse{
+	response := &pb.PurchaseTicketsResponse{
 		TicketHashes: hashesBytes,
 		Tickets:      unsignedTickets,
 		SplitTx:      splitTxBytes,
-	}, nil
+	}
+	if purchaseErr != nil {
+		response.Error = purchaseErr.Error()
+	}
+	for _, result := range ticketsResponse.Results {
+		item := &pb.TicketPurchaseResult{TicketHash: result.TicketHash[:], Published: result.Published}
+		if result.PublicationError != nil {
+			item.PublicationError = result.PublicationError.Error()
+		}
+		if result.VSPAttempted {
+			status := vsp.ManagedTicketStarted
+			if result.VSPError != nil {
+				status = vsp.ManagedTicketFailed
+			}
+			item.Registration = marshalVSPProcessResults([]vsp.ManagedTicketResult{{TicketHash: result.TicketHash, Status: status, Err: result.VSPError}})[0]
+		}
+		response.Results = append(response.Results, item)
+	}
+	return response, nil
 }
 
 // deprecated
@@ -2396,6 +2435,9 @@ func (s *walletServer) TransactionNotifications(req *pb.TransactionNotifications
 
 	n := s.wallet.NtfnServer.TransactionNotifications()
 	defer n.Done()
+	if err := svr.SendHeader(metadata.Pairs("exccwallet-subscription-ready", "true")); err != nil {
+		return translateError(err)
+	}
 
 	ctxDone := svr.Context().Done()
 	for {
@@ -2424,6 +2466,9 @@ func (s *walletServer) AccountNotifications(req *pb.AccountNotificationsRequest,
 
 	n := s.wallet.NtfnServer.AccountNotifications()
 	defer n.Done()
+	if err := svr.SendHeader(metadata.Pairs("exccwallet-subscription-ready", "true")); err != nil {
+		return translateError(err)
+	}
 
 	ctxDone := svr.Context().Done()
 	for {
@@ -2618,18 +2663,18 @@ func StartTicketBuyerV2Service(server *grpc.Server, loader *loader.Loader) {
 
 // StartTicketBuyer starts the automatic ticket buyer for the v2 service.
 func (t *ticketbuyerV2Server) RunTicketBuyer(req *pb.RunTicketBuyerRequest, svr pb.TicketBuyerV2Service_RunTicketBuyerServer) error {
-	wallet, ok := t.loader.LoadedWallet()
-	if !ok {
-		return status.Errorf(codes.FailedPrecondition, "Wallet has not been loaded")
+	run, err := t.beginTicketBuyer(svr.Context())
+	if err != nil {
+		return err
 	}
+	defer t.finishTicketBuyer(run)
+	wallet := run.wallet
 	params := wallet.ChainParams()
-
-	ctx := svr.Context()
+	ctx := run.ctx
 	// Legacy vsp request. After stopping supporting the old vsp version, this
 	// code can be removed.
 	// Confirm validity of provided voting addresses and pool addresses.
 	var votingAddress stdaddr.StakeAddress
-	var err error
 	if req.VotingAddress != "" {
 		votingAddress, err = decodeStakeAddress(req.VotingAddress, params)
 		if err != nil {
@@ -2751,16 +2796,19 @@ func (t *ticketbuyerV2Server) RunTicketBuyer(req *pb.RunTicketBuyerRequest, svr 
 			zero(req.Passphrase)
 		}
 
-		err = wallet.Unlock(svr.Context(), req.Passphrase, lock)
+		err = wallet.Unlock(ctx, req.Passphrase, lock)
 		if err != nil {
 			return translateError(err)
 		}
 		defer lockWallet()
 	}
 
-	err = tb.Run(svr.Context(), req.Passphrase)
+	if err := svr.Send(&pb.RunTicketBuyerResponse{RunId: run.id}); err != nil {
+		return translateError(err)
+	}
+	err = tb.Run(ctx, req.Passphrase)
 	if err != nil {
-		if svr.Context().Err() != nil {
+		if ctx.Err() != nil {
 			return status.Errorf(codes.Canceled, "TicketBuyerV2 instance canceled, account number: %v", req.Account)
 		}
 		return status.Errorf(codes.Unknown, "TicketBuyerV2 instance errored: %v", err)
@@ -2851,7 +2899,7 @@ func (s *loaderServer) WalletExists(ctx context.Context, req *pb.WalletExistsReq
 func (s *loaderServer) CloseWallet(ctx context.Context, req *pb.CloseWalletRequest) (
 	*pb.CloseWalletResponse, error) {
 
-	err := s.loader.UnloadWallet()
+	err := ticketBuyerV2Service.unloadWallet(ctx, s.loader)
 	if errors.Is(err, errors.Invalid) {
 		return nil, status.Errorf(codes.FailedPrecondition, "Wallet is not loaded")
 	}
@@ -2889,6 +2937,9 @@ func (s *loaderServer) RpcSync(req *pb.RpcSyncRequest, svr pb.WalletLoaderServic
 	_, err := wallet.NetworkBackend()
 	if err == nil {
 		return status.Errorf(codes.FailedPrecondition, "wallet is loaded and already synchronizing")
+	}
+	if err := validateSyncCertificate(req.Certificate); err != nil {
+		return err
 	}
 
 	if req.DiscoverAccounts && len(req.PrivatePassphrase) == 0 {
@@ -3023,14 +3074,7 @@ func (s *loaderServer) RpcSync(req *pb.RpcSyncRequest, svr pb.WalletLoaderServic
 
 	// Synchronize until error or RPC cancelation.
 	err = syncer.Run(svr.Context())
-	if err != nil {
-		if svr.Context().Err() != nil {
-			return status.Errorf(codes.Canceled, "Wallet synchronization canceled: %v", err)
-		}
-		return status.Errorf(codes.Unknown, "Wallet synchronization stopped: %v", err)
-	}
-
-	return nil
+	return syncError(svr.Context(), err)
 }
 
 func (s *loaderServer) SpvSync(req *pb.SpvSyncRequest, svr pb.WalletLoaderService_SpvSyncServer) error {
@@ -3203,15 +3247,7 @@ func (s *loaderServer) SpvSync(req *pb.SpvSyncRequest, svr pb.WalletLoaderServic
 	}
 
 	err = syncer.Run(svr.Context())
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return status.Errorf(codes.Canceled, "SPV synchronization canceled: %v", err)
-		} else if errors.Is(err, context.DeadlineExceeded) {
-			return status.Errorf(codes.DeadlineExceeded, "SPV synchronization deadline exceeded: %v", err)
-		}
-		return translateError(err)
-	}
-	return nil
+	return syncError(svr.Context(), err)
 }
 
 func (s *loaderServer) RescanPoint(ctx context.Context, req *pb.RescanPointRequest) (*pb.RescanPointResponse, error) {
@@ -3486,7 +3522,7 @@ func (s *votingServer) updateVSPVoteChoices(ctx context.Context, ticketHash *cha
 			}
 			return err
 		}
-		vspClient, err := loader.LookupVSP(vspHost)
+		vspClient, err := loader.LookupVSP(s.wallet, vspHost)
 		if err != nil {
 			return err
 		}
@@ -3502,7 +3538,7 @@ func (s *votingServer) updateVSPVoteChoices(ctx context.Context, ticketHash *cha
 			}
 			return err
 		}
-		vspClient, err := loader.LookupVSP(vspHost)
+		vspClient, err := loader.LookupVSP(s.wallet, vspHost)
 		if err != nil {
 			return err
 		}
@@ -4144,12 +4180,12 @@ func (s *walletServer) ProcessManagedTickets(ctx context.Context, req *pb.Proces
 		return nil, status.Errorf(codes.Unknown, "VSPClient instance failed to start. Error: %v", err)
 	}
 
-	err = vspClient.RecoverManagedTickets(ctx, policy)
-	if err != nil {
-		return nil, status.Errorf(codes.Unknown, "ProcessManagedTickets failed. Error: %v", err)
+	results, err := vspClient.RecoverManagedTicketsWithResults(ctx, policy)
+	if err != nil && len(results) == 0 {
+		return nil, translateError(err)
 	}
 
-	return &pb.ProcessManagedTicketsResponse{}, nil
+	return &pb.ProcessManagedTicketsResponse{Results: marshalVSPProcessResults(results)}, nil
 }
 
 func (s *walletServer) ProcessUnmanagedTickets(ctx context.Context, req *pb.ProcessUnmanagedTicketsRequest) (
@@ -4252,13 +4288,19 @@ func marshalVSPTrackedTickets(tickets []*vsp.TicketInfo) []*pb.GetTrackedVSPTick
 			State:             ticket.State,
 			Fee:               int64(ticket.Fee),
 			FeeHash:           ticket.FeeHash[:],
+			Phase:             ticket.Phase,
+			LastError:         ticket.LastError,
+			NeedsUnlock:       ticket.NeedsUnlock,
+		}
+		if !ticket.NextRetry.IsZero() {
+			res[i].NextRetryUnix = ticket.NextRetry.Unix()
 		}
 	}
 	return res
 }
 
 func (w *walletServer) GetTrackedVSPTickets(ctx context.Context, req *pb.GetTrackedVSPTicketsRequest) (*pb.GetTrackedVSPTicketsResponse, error) {
-	vspClients := loader.AllVSPs()
+	vspClients := loader.AllVSPs(w.wallet)
 	res := &pb.GetTrackedVSPTicketsResponse{
 		Vsps: make([]*pb.GetTrackedVSPTicketsResponse_VSP, 0, len(vspClients)),
 	}

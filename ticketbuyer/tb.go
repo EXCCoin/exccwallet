@@ -10,12 +10,12 @@ import (
 	"runtime/trace"
 	"sync"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/internal/vsp"
-	"github.com/EXCCoin/exccwallet/v2/wallet"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/internal/vsp"
+	"github.com/EXCCoin/exccwallet/v2/wallet"
 )
 
 const minconf = 1
@@ -86,10 +86,16 @@ func (tb *TB) Run(ctx context.Context, passphrase []byte) error {
 	}
 
 	c := tb.wallet.NtfnServer.MainTipChangedNotifications()
-	defer c.Done()
 
 	ctx, outerCancel := context.WithCancel(ctx)
-	defer outerCancel()
+	var workers sync.WaitGroup
+	defer func() {
+		outerCancel()
+		// Drain tip notifications before waiting for workers, which may still
+		// publish other notifications while a tip sender holds their mutex.
+		c.Done()
+		workers.Wait()
+	}()
 	var fatal error
 	var fatalMu sync.Mutex
 
@@ -98,7 +104,6 @@ func (tb *TB) Run(ctx context.Context, passphrase []byte) error {
 	for {
 		select {
 		case <-ctx.Done():
-			defer outerCancel()
 			fatalMu.Lock()
 			err := fatal
 			fatalMu.Unlock()
@@ -178,8 +183,10 @@ func (tb *TB) Run(ctx context.Context, passphrase []byte) error {
 
 			cancelCtx, cancel := context.WithCancel(ctx)
 			cancels = append(cancels, cancel)
+			purchaseExpiry := expiry
 			buyTickets := func() {
-				err := tb.buy(cancelCtx, passphrase, tipHeader, expiry, &cfg)
+				defer workers.Done()
+				err := tb.buy(cancelCtx, passphrase, tipHeader, purchaseExpiry, &cfg)
 				if err != nil {
 					switch {
 					// silence these errors
@@ -198,9 +205,12 @@ func (tb *TB) Run(ctx context.Context, passphrase []byte) error {
 				}
 			}
 			for i := 0; cfg.BuyTickets && i < multiple; i++ {
+				workers.Add(1)
 				go buyTickets()
 			}
+			workers.Add(1)
 			go func() {
+				defer workers.Done()
 				err := tb.mixChange(ctx, &cfg)
 				if err != nil {
 					log.Error(err)

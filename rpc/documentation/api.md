@@ -1,6 +1,6 @@
 # RPC API Specification
 
-Version: 7.13.x
+Version: 7.17.x
 
 **Note:** This document assumes the reader is familiar with gRPC concepts.
 Refer to the [gRPC Concepts documentation](https://www.grpc.io/docs/guides/concepts.html)
@@ -74,6 +74,14 @@ rules of Semantic Versioning (SemVer) 2.0.0.
 - `string prerelease`: The SemVer pre-release version identifier, if any.
 
 - `string build_metadata`: Extra SemVer build metadata, if any.
+
+- `repeated string capabilities`: Optional features supported by this daemon.
+  Version 7.17 adds `vsp-status`, `vsp-process-results`,
+  `ticket-purchase-results`, `wallet-state`, `ticket-buyer-stop`, and
+  `subscription-ready`. Clients should check these before using the additions.
+
+- `string daemon_version`: The exccwallet application version, separate from
+  the RPC API version.
 
 **Expected errors:** None
 
@@ -442,6 +450,10 @@ The service provides the following methods:
 - [`UnlockAccount`](#UnlockAccount)
 - [`LockAccount`](#LockAccount)
 - [`GetTrackedVSPTickets`](#GetTrackedVSPTickets)
+- [`GetVSPStatus`](#getvspstatus)
+- [`ProcessManagedTickets`](#processmanagedtickets)
+- [`WalletState`](#walletstate)
+- [`WalletStateNotifications`](#walletstatenotifications)
 
 #### `Ping`
 
@@ -1761,6 +1773,17 @@ ticker_address, pool_address, expiry, tx_fee, ticket_fee.
 
 - `repeated bytes split_tx`: The split tx bytes when dont_sign_tx is true.
 
+- `repeated TicketPurchaseResult results`: Per-ticket publication and VSP
+  registration results. Each entry contains `ticket_hash`, `published`,
+  `publication_error`, and an optional `registration` result.
+
+- `string error`: An error that occurred after some tickets were published.
+  A successful RPC can therefore report a partial purchase. For signed
+  purchases, `ticket_hashes` contains only published tickets. Do not repeat the
+  full purchase because this field is nonempty; review the returned hashes and
+  per-ticket results first. A transport failure can still leave the outcome
+  unknown.
+
 ___
 
 **Expected errors:**
@@ -2612,6 +2635,66 @@ following the new vspd mode.
 
   - `bytes fee_hash`: The hash of the fee transaction that pays to the VSP.
 
+  - `string phase`: The current or scheduled fee-processing step.
+
+  - `string last_error`: The most recent processing error, if any.
+
+  - `bool needs_unlock`: The most recent error requires wallet or account keys.
+
+  - `int64 next_retry_unix`: Scheduled retry time in Unix seconds, or zero if
+    no retry is scheduled. A job's presence alone does not prove progress.
+
+#### `GetVSPStatus`
+
+Returns saved VSP fee records, totals, and current jobs for the loaded wallet.
+The request accepts `page_size` (default 200, maximum 500), `after_ticket_hash`
+(a 32-byte cursor), and `revision` (the first response's 32-byte token).
+Records are ordered by raw ticket-hash bytes. Continue with
+`next_after_ticket_hash` until it is empty, retaining the same revision.
+
+Every response includes global `started`, `paid`, `errored`, and `confirmed`
+counts. `registrations` contains the page of fee records, including confirmed
+records. Each record includes its hash, fee status/hash, saved provider, exact
+ticket status when known, and any current job. `ticket_missing` means the
+transaction was also absent from the wallet's transaction lookup; an unknown
+ticket status alone does not mean a ticket is missing. Confirmed fee records
+do not need a ticket-status lookup.
+
+`vsps` contains all current jobs on the first page, including jobs without a
+saved fee record. `tracking_known` indicates whether job evidence was read.
+An `Aborted` response means the fee records, local transaction presence, job
+details, or chain tip changed during the read; discard the accumulated pages
+and retry. A scheduled retry or a running job is not a progress guarantee.
+The response never starts or retries fee processing.
+
+#### `ProcessManagedTickets`
+
+Resumes incomplete tickets already managed by the requested VSP. The saved
+provider and public key must match. This includes eligible unmined tickets
+after a daemon restart. It does not enroll unknown tickets with a provider.
+
+`ProcessManagedTicketsResponse.results` reports each checked ticket as
+`STARTED`, `ALREADY_TRACKED`, `CONFIRMED`, `UNKNOWN_TO_PROVIDER`, `NOT_MANAGED`,
+`DIFFERENT_PROVIDER`, or `FAILED`, with an error when available. `STARTED`
+means a fee job was started, not that its fee is confirmed. Per-ticket failures
+remain in a successful RPC response; request-wide failures use gRPC errors.
+
+#### `WalletState`
+
+Returns `locked` and `watching_only` for the loaded wallet.
+
+#### `WalletStateNotifications`
+
+Subscribes before sending the initial wallet state, then sends the latest state
+when wallet or account key access changes, including automatic wallet locking.
+Changes may be coalesced. Refresh account information on each notification if
+account-specific key access matters.
+
+With `subscription-ready`, transaction and account notification streams send
+the response header `exccwallet-subscription-ready: true` after registering the
+listener, even when there are no events. Clients can use it before taking their
+initial safety snapshot.
+
 ## `SeedService`
 
 The `SeedService` service provides RPC clients with the ability to generate
@@ -3008,6 +3091,7 @@ launch the V2 ticket buyer.
 **Methods:**
 
 - [`RunTicketBuyer`](#runautobuyer)
+- [`StopTicketBuyer`](#stopticketbuyer)
 
 ### Methods
 
@@ -3034,6 +3118,11 @@ The users may specify a balance to maintain as well as various settings for purc
 
 **Response:** `stream RunTicketBuyerResponse`
 
+The first response contains a nonzero `run_id`. Only one V2 buyer may run at a
+time; another start returns `AlreadyExists` while it is active or stopping.
+Cancelling the stream requests shutdown. Use `StopTicketBuyer` for an explicit
+acknowledgement.
+
 **Expected errors:**
 
 - `FailedPrecondition`: Wallet has not been loaded.
@@ -3043,6 +3132,14 @@ The users may specify a balance to maintain as well as various settings for purc
 - `InvalidArgument`: An invalid pool address was used.
 
 - `InvalidArgument`: A negative balance to maintain given.
+
+#### `StopTicketBuyer`
+
+Pass the `run_id` returned by `RunTicketBuyer`. The response is sent after that
+buyer's purchase and mixing workers have returned. A repeated stop for a
+finished run succeeds; an ID belonging to a different active run is rejected.
+A deadline or transport error does not confirm shutdown. Separate VSP fee
+jobs may continue after ticket buying stops.
 
 ## `AccountMixerService`
 

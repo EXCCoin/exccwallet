@@ -3559,6 +3559,10 @@ func (s *Server) purchaseTicket(ctx context.Context, icmd interface{}) (interfac
 // processUnmanagedTicket takes a ticket hash as an argument and attempts to
 // start managing it for the set vsp client from the config.
 func (s *Server) processUnmanagedTicket(ctx context.Context, icmd interface{}) (interface{}, error) {
+	w, ok := s.walletLoader.LoadedWallet()
+	if !ok {
+		return nil, errUnloadedWallet
+	}
 	cmd := icmd.(*types.ProcessUnmanagedTicketCmd)
 
 	var ticketHash *chainhash.Hash
@@ -3575,7 +3579,7 @@ func (s *Server) processUnmanagedTicket(ctx context.Context, icmd interface{}) (
 	if vspHost == "" {
 		return nil, rpcErrorf(dcrjson.ErrRPCInvalidParameter, "vsphost must be set in options")
 	}
-	vspClient, err := loader.LookupVSP(vspHost)
+	vspClient, err := loader.LookupVSP(w, vspHost)
 	if err != nil {
 		return nil, err
 	}
@@ -4383,7 +4387,7 @@ func (s *Server) updateVSPVoteChoices(ctx context.Context, w *wallet.Wallet, tic
 			}
 			return err
 		}
-		vspClient, err := loader.LookupVSP(vspHost)
+		vspClient, err := loader.LookupVSP(w, vspHost)
 		if err != nil {
 			return err
 		}
@@ -4399,7 +4403,7 @@ func (s *Server) updateVSPVoteChoices(ctx context.Context, w *wallet.Wallet, tic
 			}
 			return err
 		}
-		vspClient, err := loader.LookupVSP(vspHost)
+		vspClient, err := loader.LookupVSP(w, vspHost)
 		if err != nil {
 			return err
 		}

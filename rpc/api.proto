@@ -16,6 +16,8 @@ message VersionResponse {
 	uint32 patch = 4;
 	string prerelease = 5;
 	string build_metadata = 6;
+	repeated string capabilities = 7;
+	string daemon_version = 8;
 }
 
 service WalletService {
@@ -87,6 +89,9 @@ service WalletService {
 	rpc ProcessUnmanagedTickets (ProcessUnmanagedTicketsRequest) returns (ProcessUnmanagedTicketsResponse);
 	rpc SetVspdVoteChoices (SetVspdVoteChoicesRequest) returns (SetVspdVoteChoicesResponse);
 	rpc GetTrackedVSPTickets (GetTrackedVSPTicketsRequest) returns (GetTrackedVSPTicketsResponse);
+	rpc GetVSPStatus (GetVSPStatusRequest) returns (GetVSPStatusResponse);
+	rpc WalletState (WalletStateRequest) returns (WalletStateResponse);
+	rpc WalletStateNotifications (WalletStateRequest) returns (stream WalletStateResponse);
 	rpc DiscoverUsage (DiscoverUsageRequest) returns (DiscoverUsageResponse);
 }
 
@@ -105,6 +110,7 @@ service AccountMixerService {
 }
 service TicketBuyerV2Service {
 	rpc RunTicketBuyer (RunTicketBuyerRequest) returns (stream RunTicketBuyerResponse);
+	rpc StopTicketBuyer (StopTicketBuyerRequest) returns (StopTicketBuyerResponse);
 }
 
 service TicketBuyerService {
@@ -632,6 +638,15 @@ message PurchaseTicketsResponse {
 	repeated bytes ticket_hashes = 1;
 	repeated bytes tickets = 2;
 	bytes split_tx = 3;
+	repeated TicketPurchaseResult results = 4;
+	string error = 5;
+}
+
+message TicketPurchaseResult {
+	bytes ticket_hash = 1;
+	bool published = 2;
+	string publication_error = 3;
+	VSPProcessResult registration = 4;
 }
 
 message RevokeTicketRequest {
@@ -886,7 +901,14 @@ message RunTicketBuyerRequest {
 	uint32 change_account = 15;
 }
 
-message RunTicketBuyerResponse {}
+message RunTicketBuyerResponse {
+	uint64 run_id = 1;
+}
+
+message StopTicketBuyerRequest {
+	uint64 run_id = 1;
+}
+message StopTicketBuyerResponse {}
 
 message RunAccountMixerRequest {
 	bytes passphrase = 1;
@@ -1354,7 +1376,25 @@ message ProcessManagedTicketsRequest {
 	uint32 change_account = 4;
 }
 
-message ProcessManagedTicketsResponse {}
+message ProcessManagedTicketsResponse {
+	repeated VSPProcessResult results = 1;
+}
+
+message VSPProcessResult {
+	enum Status {
+		UNKNOWN = 0;
+		STARTED = 1;
+		ALREADY_TRACKED = 2;
+		CONFIRMED = 3;
+		UNKNOWN_TO_PROVIDER = 4;
+		NOT_MANAGED = 5;
+		DIFFERENT_PROVIDER = 6;
+		FAILED = 7;
+	}
+	bytes ticket_hash = 1;
+	Status status = 2;
+	string error = 3;
+}
 
 message ProcessUnmanagedTicketsRequest {
 	string vsp_host = 1;
@@ -1384,6 +1424,10 @@ message GetTrackedVSPTicketsResponse {
 		uint32 state = 4;
 		int64 fee = 5;
 		bytes fee_hash = 6;
+		string phase = 7;
+		string last_error = 8;
+		bool needs_unlock = 9;
+		int64 next_retry_unix = 10;
 	}
 	message VSP {
 		string host = 1;
@@ -1391,6 +1435,44 @@ message GetTrackedVSPTicketsResponse {
 	}
 
 	repeated VSP vsps = 1;
+}
+
+message GetVSPStatusRequest {
+	uint32 page_size = 1;
+	bytes after_ticket_hash = 2;
+	// Pass the previous page's revision to reject a changed snapshot.
+	bytes revision = 3;
+}
+
+message VSPFeeRecord {
+	bytes ticket_hash = 1;
+	GetVSPTicketsByFeeStatusRequest.FeeStatus fee_status = 2;
+	bytes fee_hash = 3;
+	string host = 4;
+	GetTicketsResponse.TicketDetails.TicketStatus ticket_status = 5;
+	bool ticket_missing = 6;
+	bool ticket_status_known = 7;
+	GetTrackedVSPTicketsResponse.Ticket job = 8;
+}
+
+message GetVSPStatusResponse {
+	// Registrations are paginated by ticket hash; totals cover every record.
+	repeated VSPFeeRecord registrations = 1;
+	uint32 started = 2;
+	uint32 paid = 3;
+	uint32 errored = 4;
+	uint32 confirmed = 5;
+	bytes revision = 6;
+	bytes next_after_ticket_hash = 7;
+	bool tracking_known = 8;
+	// All current jobs, included only on the first page.
+	repeated GetTrackedVSPTicketsResponse.VSP vsps = 9;
+}
+
+message WalletStateRequest {}
+message WalletStateResponse {
+	bool locked = 1;
+	bool watching_only = 2;
 }
 
 message DiscoverUsageRequest {

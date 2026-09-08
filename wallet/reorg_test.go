@@ -19,6 +19,7 @@ import (
 	"github.com/EXCCoin/exccd/gcs/v3/blockcf2"
 	"github.com/EXCCoin/exccd/txscript/v4"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
 	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
 	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 )
@@ -242,8 +243,27 @@ func TestChainSwitchPrunesTicketsWithNextStakeDifficulty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	funding.LockTime++
+	funding.CachedHash = nil
+	badSpend := chaingen.MakeSpendableOutForTx(funding, 1, 0, 0)
+	badTicket := maketg(t, params).CreateTicketPurchaseTx(&badSpend, dcrutil.Amount(header.SBits), 1)
+	badRec, err := udb.NewTxRecordFromMsgTx(badTicket, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const host = "https://vsp.example"
+	pruned := make([]chainhash.Hash, 0, 1)
+	w.SetVSPTicketPruner(func(hash chainhash.Hash) { pruned = append(pruned, hash) })
 	err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
-		return w.txStore.InsertMemPoolTx(dbtx, rec)
+		for _, r := range []*udb.TxRecord{rec, badRec} {
+			if err := w.txStore.InsertMemPoolTx(dbtx, r); err != nil {
+				return err
+			}
+			if err := udb.SetVSPTicket(dbtx, &r.Hash, &udb.VSPTicket{Host: host, PubKey: make([]byte, 32)}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -262,10 +282,25 @@ func TestChainSwitchPrunesTicketsWithNextStakeDifficulty(t *testing.T) {
 		ns := dbtx.ReadBucket(wtxmgrNamespaceKey)
 		var err error
 		unmined, err = w.txStore.UnminedTxHashes(ns)
-		return err
+		if err != nil {
+			return err
+		}
+		if _, err := udb.GetVSPTicket(dbtx, badRec.Hash); !errors.Is(err, errors.NotExist) {
+			t.Fatalf("pruned fee record remains: %v", err)
+		}
+		if _, err := udb.GetVSPTicket(dbtx, rec.Hash); err != nil {
+			t.Fatalf("valid ticket fee record removed: %v", err)
+		}
+		if _, err := udb.GetVSPPubKey(dbtx, []byte(host)); err != nil {
+			t.Fatalf("shared provider identity removed: %v", err)
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(pruned) != 1 || pruned[0] != badRec.Hash {
+		t.Fatalf("pruned VSP jobs = %v, want %v", pruned, badRec.Hash)
 	}
 	if len(unmined) != 1 || *unmined[0] != rec.Hash {
 		t.Fatalf("unmined transactions = %v, want ticket %v", unmined, rec.Hash)

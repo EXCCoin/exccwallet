@@ -7,9 +7,9 @@ package udb
 import (
 	"bytes"
 
+	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccwallet/v2/errors"
 	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
-	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 )
 
 var (
@@ -99,6 +99,12 @@ func SetVSPTicket(dbtx walletdb.ReadWriteTx, ticketHash *chainhash.Hash, record 
 
 	// Save the creation date of the store.
 	return bucket.Put(ticketHash[:], serializedRecord)
+}
+
+// DeleteVSPTicket deletes only this ticket's fee record. Provider identity
+// records may still be referenced by other tickets and are preserved.
+func DeleteVSPTicket(dbtx walletdb.ReadWriteTx, ticketHash chainhash.Hash) error {
+	return dbtx.ReadWriteBucket(vspBucketKey).Delete(ticketHash[:])
 }
 
 // GetVSPTicket gets a specific ticket by its hash.

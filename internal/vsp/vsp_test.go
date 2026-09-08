@@ -39,36 +39,6 @@ func TestBindPolicyIsRequestLocal(t *testing.T) {
 	}
 }
 
-func TestSkipManagedTicket(t *testing.T) {
-	unexpectedErr := errors.E(errors.IO)
-	tests := []struct {
-		name      string
-		confirmed bool
-		err       error
-		localOnly bool
-		wantSkip  bool
-		wantErr   error
-	}{
-		{name: "seed restored", err: errors.E(errors.NotExist)},
-		{name: "automatic resume", err: errors.E(errors.NotExist), localOnly: true, wantSkip: true},
-		{name: "unexpected error", err: unexpectedErr, wantErr: unexpectedErr},
-		{name: "confirmed", confirmed: true, wantSkip: true},
-		{name: "unconfirmed"},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			gotSkip, gotErr := skipManagedTicket(test.confirmed, test.err, test.localOnly)
-			if gotSkip != test.wantSkip {
-				t.Fatalf("skip: got %v, want %v", gotSkip, test.wantSkip)
-			}
-			if gotErr != test.wantErr {
-				t.Fatalf("error: got %v, want %v", gotErr, test.wantErr)
-			}
-		})
-	}
-}
-
 func TestIsUnknownTicketError(t *testing.T) {
 	tests := []struct {
 		name string

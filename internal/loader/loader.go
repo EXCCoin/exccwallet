@@ -12,12 +12,12 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/wallet"
-	_ "github.com/EXCCoin/exccwallet/v2/wallet/drivers/bdb" // driver loaded during init
 	"github.com/EXCCoin/exccd/chaincfg/v3"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/wallet"
+	_ "github.com/EXCCoin/exccwallet/v2/wallet/drivers/bdb" // driver loaded during init
 )
 
 const (
@@ -89,6 +89,7 @@ func NewLoader(chainParams *chaincfg.Params, dbDirPath string, stakeOptions *Sta
 // onLoaded executes each added callback and prevents loader from loading any
 // additional wallets.  Requires mutex to be locked.
 func (l *Loader) onLoaded(w *wallet.Wallet, db wallet.DB) {
+	registerVSPWallet(w)
 	for _, fn := range l.callbacks {
 		fn(w)
 	}
@@ -398,6 +399,7 @@ func (l *Loader) UnloadWallet() error {
 		return errors.E(op, errors.Invalid, "wallet is unopened")
 	}
 
+	closeVSPWallet(l.wallet)
 	err := l.db.Close()
 	if err != nil {
 		return errors.E(op, err)

@@ -236,7 +236,7 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest,
 		for _, hash := range hashes {
 			w.NtfnServer.notifyRemovedTransaction(*hash)
 		}
-		return nil
+		return w.pruneVSPTickets(dbtx, hashes)
 	})
 	w.lockedOutpointMu.Unlock()
 	if err != nil {

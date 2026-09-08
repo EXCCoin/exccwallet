@@ -104,10 +104,11 @@ type Wallet struct {
 	disapprovePercent uint32
 
 	// Data stores
-	db       walletdb.DB
-	manager  *udb.Manager
-	txStore  *udb.Store
-	stakeMgr *udb.StakeStore
+	db              walletdb.DB
+	manager         *udb.Manager
+	txStore         *udb.Store
+	stakeMgr        *udb.StakeStore
+	vspTicketPruner func(chainhash.Hash)
 
 	// Handlers for stake system.
 	stakeSettingsLock  sync.Mutex
@@ -1642,6 +1643,15 @@ type PurchaseTicketsResponse struct {
 	TicketHashes []*chainhash.Hash
 	Tickets      []*wire.MsgTx
 	SplitTx      *wire.MsgTx
+	Results      []TicketPurchaseResult
+}
+
+type TicketPurchaseResult struct {
+	TicketHash       chainhash.Hash
+	Published        bool
+	PublicationError error
+	VSPAttempted     bool
+	VSPError         error
 }
 
 // PurchaseTickets purchases tickets, returning purchase tickets response.
@@ -1771,6 +1781,7 @@ func (w *Wallet) Unlock(ctx context.Context, passphrase []byte, timeout <-chan t
 	case err == nil:
 	}
 	w.replacePassphraseTimeout(wasLocked, timeout)
+	w.NtfnServer.notifyWalletState()
 	return nil
 }
 
@@ -1780,24 +1791,36 @@ func (w *Wallet) Unlock(ctx context.Context, passphrase []byte, timeout <-chan t
 // If the passphrase has zero length, the private keys are re-encrypted with the
 // manager's global passphrase.
 func (w *Wallet) SetAccountPassphrase(ctx context.Context, account uint32, passphrase []byte) error {
-	return walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
+	err := walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
 		return w.manager.SetAccountPassphrase(dbtx, account, passphrase)
 	})
+	if err == nil {
+		w.NtfnServer.notifyWalletState()
+	}
+	return err
 }
 
 // UnlockAccount decrypts a uniquely-encrypted account's private keys.
 func (w *Wallet) UnlockAccount(ctx context.Context, account uint32, passphrase []byte) error {
-	return walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
+	err := walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
 		return w.manager.UnlockAccount(dbtx, account, passphrase)
 	})
+	if err == nil {
+		w.NtfnServer.notifyWalletState()
+	}
+	return err
 }
 
 // LockAccount locks an individually-encrypted account by removing private key
 // access until unlocked again.
 func (w *Wallet) LockAccount(ctx context.Context, account uint32) error {
-	return walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
+	err := walletdb.View(ctx, w.db, func(dbtx walletdb.ReadTx) error {
 		return w.manager.LockAccount(dbtx, account)
 	})
+	if err == nil {
+		w.NtfnServer.notifyWalletState()
+	}
+	return err
 }
 
 // AccountUnlocked returns whether an individually-encrypted account is unlocked.
@@ -1877,6 +1900,7 @@ func (w *Wallet) Lock() {
 	w.passphraseTimeoutCancel = nil
 	w.passphraseTimeoutMu.Unlock()
 	w.passphraseUsedMu.Unlock()
+	w.NtfnServer.notifyWalletState()
 }
 
 // Locked returns whether the account manager for a wallet is locked.
@@ -5750,7 +5774,7 @@ func (w *Wallet) IsVSPTicketConfirmed(ctx context.Context, ticketHash *chainhash
 func (w *Wallet) UpdateVspTicketFeeToPaid(ctx context.Context, ticketHash, feeHash *chainhash.Hash, host string, pubkey []byte) error {
 	var err error
 	err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
-		err = udb.SetVSPTicket(dbtx, ticketHash, &udb.VSPTicket{
+		err = w.setVSPTicket(dbtx, ticketHash, &udb.VSPTicket{
 			FeeHash:     *feeHash,
 			FeeTxStatus: uint32(udb.VSPFeeProcessPaid),
 			Host:        host,
@@ -5765,7 +5789,7 @@ func (w *Wallet) UpdateVspTicketFeeToPaid(ctx context.Context, ticketHash, feeHa
 func (w *Wallet) UpdateVspTicketFeeToStarted(ctx context.Context, ticketHash, feeHash *chainhash.Hash, host string, pubkey []byte) error {
 	var err error
 	err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
-		err = udb.SetVSPTicket(dbtx, ticketHash, &udb.VSPTicket{
+		err = w.setVSPTicket(dbtx, ticketHash, &udb.VSPTicket{
 			FeeHash:     *feeHash,
 			FeeTxStatus: uint32(udb.VSPFeeProcessStarted),
 			Host:        host,
@@ -5780,7 +5804,7 @@ func (w *Wallet) UpdateVspTicketFeeToStarted(ctx context.Context, ticketHash, fe
 func (w *Wallet) UpdateVspTicketFeeToErrored(ctx context.Context, ticketHash *chainhash.Hash, host string, pubkey []byte) error {
 	var err error
 	err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
-		err = udb.SetVSPTicket(dbtx, ticketHash, &udb.VSPTicket{
+		err = w.setVSPTicket(dbtx, ticketHash, &udb.VSPTicket{
 			FeeHash:     chainhash.Hash{},
 			FeeTxStatus: uint32(udb.VSPFeeProcessErrored),
 			Host:        host,
@@ -5795,7 +5819,7 @@ func (w *Wallet) UpdateVspTicketFeeToErrored(ctx context.Context, ticketHash *ch
 func (w *Wallet) UpdateVspTicketFeeToConfirmed(ctx context.Context, ticketHash, feeHash *chainhash.Hash, host string, pubkey []byte) error {
 	var err error
 	err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
-		err = udb.SetVSPTicket(dbtx, ticketHash, &udb.VSPTicket{
+		err = w.setVSPTicket(dbtx, ticketHash, &udb.VSPTicket{
 			FeeHash:     *feeHash,
 			FeeTxStatus: uint32(udb.VSPFeeProcessConfirmed),
 			Host:        host,

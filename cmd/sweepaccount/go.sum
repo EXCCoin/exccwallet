@@ -59,6 +59,8 @@ github.com/EXCCoin/exccd/wire v0.0.0-20260805090014-017289472681 h1:wGTMgRYkV1ns
 github.com/EXCCoin/exccd/wire v0.0.0-20260805090014-017289472681/go.mod h1:be3Gd8AMwDMpmwb6U4zA8CDkE0KOiPvHr2Ok4gur4Cc=
 github.com/EXCCoin/exccwallet/v2 v2.8.3-0.20260805091007-bcca1b46037e h1:rZvioET6A/rBYqkrGtT9Z0WrMH6dExgAowkiFD5rCo0=
 github.com/EXCCoin/exccwallet/v2 v2.8.3-0.20260805091007-bcca1b46037e/go.mod h1:RjCUZrAok/sQtGCykdSD2N/kP93pZv6WQ435AfxXGzY=
+github.com/EXCCoin/exccwallet/v2 v2.8.6 h1:ERkvXQtD7Ygojw62vD8vmnnbZjfH/8od7KQI0yLT/Ak=
+github.com/EXCCoin/exccwallet/v2 v2.8.6/go.mod h1:RjCUZrAok/sQtGCykdSD2N/kP93pZv6WQ435AfxXGzY=
 github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 h1:w1UutsfOrms1J05zt7ISrnJIXKzwaspym5BTKGx93EI=
 github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412/go.mod h1:WPjqKcmVOxf0XSf3YxCJs6N6AOSrOx3obionmG7T0y0=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

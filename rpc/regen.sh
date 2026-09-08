@@ -3,7 +3,7 @@
 build_protoc_gen_go() {
     mkdir -p bin
     export GOBIN=$PWD/bin
-    GO111MODULE=on go install github.com/golang/protobuf/protoc-gen-go
+    GOWORK=off go install github.com/golang/protobuf/protoc-gen-go@v1.4.3
 }
 
 generate() {
