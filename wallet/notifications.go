@@ -225,6 +225,12 @@ func relevantAccounts(w *Wallet, m map[uint32]dcrutil.Amount, txs []TransactionS
 }
 
 func (s *NotificationServer) notifyUnminedTransaction(dbtx walletdb.ReadTx, details *udb.TxDetails) {
+	if notify := s.prepareUnminedTransaction(dbtx, details); notify != nil {
+		notify()
+	}
+}
+
+func (s *NotificationServer) prepareUnminedTransaction(dbtx walletdb.ReadTx, details *udb.TxDetails) func() {
 	defer s.mu.Unlock()
 	s.mu.Lock()
 
@@ -236,29 +242,33 @@ func (s *NotificationServer) notifyUnminedTransaction(dbtx walletdb.ReadTx, deta
 
 	clients := s.transactions
 	if len(clients) == 0 {
-		return
+		return nil
 	}
 
 	unminedTxs := []TransactionSummary{makeTxSummary(dbtx, s.wallet, details)}
 	unminedHashes, err := s.wallet.txStore.UnminedTxHashes(dbtx.ReadBucket(wtxmgrNamespaceKey))
 	if err != nil {
 		log.Errorf("Cannot fetch unmined transaction hashes: %v", err)
-		return
+		return nil
 	}
 	bals := make(map[uint32]dcrutil.Amount)
 	relevantAccounts(s.wallet, bals, unminedTxs)
 	err = totalBalances(dbtx, s.wallet, bals)
 	if err != nil {
 		log.Errorf("Cannot determine balances for relevant accounts: %v", err)
-		return
+		return nil
 	}
 	n := &TransactionNotifications{
 		UnminedTransactions:      unminedTxs,
 		UnminedTransactionHashes: unminedHashes,
 		NewBalances:              flattenBalanceMap(bals),
 	}
-	for _, c := range clients {
-		c <- n
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, c := range s.transactions {
+			c <- n
+		}
 	}
 }
 

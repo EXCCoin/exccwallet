@@ -367,17 +367,52 @@ func (c *Client) ProcessWithPolicy(ctx context.Context, ticketHash *chainhash.Ha
 	}
 
 	switch feeStatus {
-	case udb.VSPFeeProcessStarted, udb.VSPFeeProcessErrored:
-		// If VSPTicket has been started or errored then attempt to create a new fee
-		// transaction, submit it then confirm.
-		fp := c.feePayment(ticketHash, policy, false)
-		if fp == nil {
-			err := c.Wallet.UpdateVspTicketFeeToErrored(ctx, ticketHash, c.client.url, c.client.pub)
-			if err != nil {
+	case udb.VSPFeeProcessStarted, udb.VSPFeeProcessErrored, udb.VSPFeeProcessPaid:
+	default:
+		return nil
+	}
+	if vspTicket != nil && vspTicket.FeeHash != (chainhash.Hash{}) && len(vspTicket.Host) > 0 &&
+		!c.sameProvider(vspTicket.Host, vspTicket.PubKey) {
+		return fmt.Errorf("ticket already paid or confirmed with another vsp")
+	}
+	fp := c.feePaymentWithTx(ticketHash, policy, feeStatus == udb.VSPFeeProcessPaid, feeTx)
+	if fp == nil {
+		if feeStatus == udb.VSPFeeProcessStarted || feeStatus == udb.VSPFeeProcessErrored {
+			if err := c.Wallet.UpdateVspTicketFeeToErrored(ctx, ticketHash, c.client.url, c.client.pub); err != nil {
 				return err
 			}
-			return fmt.Errorf("fee payment cannot be processed")
 		}
+		return fmt.Errorf("fee payment cannot be processed")
+	}
+	finish, err := fp.beginOperation(ctx)
+	if err != nil {
+		// A background confirmation can finish and remove the job while this
+		// request waits. Its persisted confirmation still completes processing.
+		if ctx.Err() == nil {
+			confirmed, checkErr := c.Wallet.IsVSPTicketConfirmed(ctx, ticketHash)
+			if checkErr == nil && confirmed {
+				return nil
+			}
+		}
+		return err
+	}
+	defer finish()
+
+	// A preceding task may have created or confirmed the fee while this request
+	// waited. Use the current durable state before contacting the provider again.
+	vspTicket, err = c.Wallet.VSPTicketInfo(ctx, ticketHash)
+	if err != nil && !errors.Is(err, errors.NotExist) {
+		return err
+	}
+	if vspTicket != nil {
+		feeStatus = udb.FeeStatus(vspTicket.FeeTxStatus)
+	}
+	if vspTicket != nil && vspTicket.FeeHash != (chainhash.Hash{}) && len(vspTicket.Host) > 0 &&
+		!c.sameProvider(vspTicket.Host, vspTicket.PubKey) {
+		return fmt.Errorf("ticket already paid or confirmed with another vsp")
+	}
+	switch feeStatus {
+	case udb.VSPFeeProcessStarted, udb.VSPFeeProcessErrored:
 		fp.mu.Lock()
 		if fp.feeTx == nil {
 			fp.feeTx = feeTx
@@ -408,12 +443,6 @@ func (c *Client) ProcessWithPolicy(ctx context.Context, ticketHash *chainhash.Ha
 		if len(vspTicket.Host) > 0 && !c.sameProvider(vspTicket.Host, vspTicket.PubKey) {
 			// Cannot confirm a paid ticket that is already with another VSP.
 			return fmt.Errorf("ticket already paid or confirmed with another vsp")
-		}
-		fp := c.feePayment(ticketHash, policy, true)
-		if fp == nil {
-			// Don't update VSPStatus to Errored if it was already paid or
-			// confirmed.
-			return fmt.Errorf("fee payment cannot be processed")
 		}
 
 		return fp.confirmPayment()

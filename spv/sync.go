@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2021 The Decred developers
+// Copyright (c) 2018-2026 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -713,7 +713,7 @@ func (s *Syncer) handleBlockInvs(ctx context.Context, rp *p2p.RemotePeer, hashes
 		return nil
 	}
 
-	blocks, err := rp.Blocks(ctx, hashes)
+	blocks, err := blocksFromPeer(ctx, rp, hashes)
 	if err != nil {
 		op := errors.Opf(opf, rp)
 		return errors.E(op, err)
@@ -780,25 +780,48 @@ func (s *Syncer) handleTxInvs(ctx context.Context, rp *p2p.RemotePeer, hashes []
 		return
 	}
 
-	// Mark transactions as processed so they are not queried from other nodes
-	// who announce them in the future.
+	// Cache unrelated announcements, but only mark wallet-relevant
+	// transactions seen after accepting them. TxHash excludes signatures;
+	// a forged witness must not suppress a later valid announcement.
+	relevant := s.filterRelevant(txs)
+	relevantHashes := make(map[chainhash.Hash]struct{}, len(relevant))
+	for _, tx := range relevant {
+		relevantHashes[tx.TxHash()] = struct{}{}
+	}
 	for _, h := range unseen {
-		s.seenTxs.Add(*h)
+		if _, ok := relevantHashes[*h]; !ok {
+			s.seenTxs.Add(*h)
+		}
 	}
 
-	// Save any relevant transaction.
-	relevant := s.filterRelevant(txs)
+	accepted := relevant[:0]
 	for _, tx := range relevant {
-		if s.wallet.ManualTickets() && stake.IsSStx(tx) {
+		if tx.Version >= stake.TxVersionAutoRevocations && stake.IsSSRtx(tx, false) {
+			s.seenTxs.Add(tx.TxHash())
 			continue
 		}
-		err := s.wallet.AddTransaction(ctx, tx, nil)
-		if err != nil {
-			op := errors.Opf(opf, rp.RemoteAddr())
-			log.Warn(errors.E(op, err))
+		if s.wallet.ManualTickets() && stake.IsSStx(tx) {
+			s.seenTxs.Add(tx.TxHash())
+			accepted = append(accepted, tx)
+			continue
 		}
+		if err := s.wallet.AddTransaction(ctx, tx, nil); err != nil {
+			op := errors.Opf(opf, rp.RemoteAddr())
+			err := errors.E(op, err)
+			log.Warn(err)
+			// Full nodes must validate spends before relaying them.
+			// SPV-only peers cannot make the same guarantee.
+			if errors.Is(err, errors.ScriptFailure) &&
+				rp.Services()&wire.SFNodeNetwork == wire.SFNodeNetwork {
+				rp.Disconnect(err)
+				break
+			}
+			continue
+		}
+		s.seenTxs.Add(tx.TxHash())
+		accepted = append(accepted, tx)
 	}
-	s.mempoolTxs(relevant)
+	s.mempoolTxs(accepted)
 }
 
 // receiveHeaderAnnouncements receives all block announcements through pushed
@@ -895,23 +918,12 @@ FilterLoop:
 		wg.Wait()
 
 		if len(fmatches) != 0 {
-			blocks, err := rp.Blocks(ctx, fmatches)
+			blocks, err := blocksFromPeer(ctx, rp, fmatches)
 			if err != nil {
 				return nil, err
 			}
 			for j, b := range blocks {
 				i := fmatchidx[j]
-
-				// Perform context-free validation on the block.
-				// Disconnect peer when invalid.
-				err := validate.MerkleRoots(b)
-				if err != nil {
-					err = validate.DCP0005MerkleRoot(b)
-				}
-				if err != nil {
-					rp.Disconnect(err)
-					return nil, err
-				}
 
 				fetched[i] = b
 			}

@@ -89,6 +89,7 @@ type feePayment struct {
 
 	// Requires locking for all access outside of Client.feePayment
 	mu            sync.Mutex
+	operation     chan struct{}
 	votingKey     string
 	ticketLive    int32
 	ticketExpires int32
@@ -228,7 +229,12 @@ func (fp *feePayment) remove(reason string) {
 
 // feePayment returns an existing managed fee payment, or creates and begins
 // processing a fee payment for a ticket.
-func (c *Client) feePayment(ticketHash *chainhash.Hash, policy Policy, paidConfirmed bool) (fp *feePayment) {
+func (c *Client) feePayment(ticketHash *chainhash.Hash, policy Policy, paidConfirmed bool) *feePayment {
+	return c.feePaymentWithTx(ticketHash, policy, paidConfirmed, nil)
+}
+
+func (c *Client) feePaymentWithTx(ticketHash *chainhash.Hash, policy Policy, paidConfirmed bool,
+	feeTx *wire.MsgTx) (fp *feePayment) {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -289,6 +295,7 @@ func (c *Client) feePayment(ticketHash *chainhash.Hash, policy Policy, paidConfi
 		ctx:        ctx,
 		cancel:     cancel,
 		ticketHash: *ticketHash,
+		feeTx:      feeTx,
 		policy:     policy,
 	}
 
@@ -321,9 +328,11 @@ func (c *Client) feePayment(ticketHash *chainhash.Hash, policy Policy, paidConfi
 	}
 	feeHash, err := w.VSPFeeHashForTicket(ctx, ticketHash)
 	if err != nil {
-		// caller must schedule next method, as paying the fee may
-		// require using provided transaction inputs.
-		return fp
+		if errors.Is(err, errors.NotExist) {
+			return fp
+		}
+		log.Errorf("cannot read saved VSP payment for %v: %v", ticketHash, err)
+		return nil
 	}
 
 	fee, err := c.tx(ctx, &feeHash)
@@ -341,11 +350,6 @@ func (c *Client) feePayment(ticketHash *chainhash.Hash, policy Policy, paidConfi
 	// If database has been updated to paid or confirmed status, we can forgo
 	// this step.
 	if !paidConfirmed {
-		err = w.UpdateVspTicketFeeToStarted(ctx, ticketHash, &feeHash, c.client.url, c.client.pub)
-		if err != nil {
-			return fp
-		}
-
 		fp.state = unprocessed // XXX fee created, but perhaps not submitted with vsp.
 		fp.fee = -1            // XXX fee amount (not needed anymore?)
 	}
@@ -424,18 +428,47 @@ func nextJitter(tipHeight, ticketLive, ticketExpires int32,
 	return jitter
 }
 
+// beginOperation serializes foreground requests and background tasks for a ticket.
+// No other payment or client lock may be held while waiting.
+func (fp *feePayment) beginOperation(ctx context.Context) (func(), error) {
+	fp.mu.Lock()
+	if fp.operation == nil {
+		fp.operation = make(chan struct{}, 1)
+	}
+	operation := fp.operation
+	fp.mu.Unlock()
+	select {
+	case operation <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-operation
+			return nil, err
+		}
+		if err := fp.ctx.Err(); err != nil {
+			<-operation
+			return nil, err
+		}
+		return func() { <-operation }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-fp.ctx.Done():
+		return nil, fp.ctx.Err()
+	}
+}
+
 // task returns a function running a feePayment method.
 // If the method errors, the error is logged, and the payment is put
 // in an errored state and may require manual processing.
 func (fp *feePayment) task(name string, method func() error) func() {
 	return func() {
-		if fp.ctx.Err() != nil {
+		finish, err := fp.beginOperation(fp.ctx)
+		if err != nil {
 			return
 		}
+		defer finish()
 		fp.timerMu.Lock()
 		fp.nextRetry = time.Time{}
 		fp.timerMu.Unlock()
-		err := method()
+		err = method()
 		fp.mu.Lock()
 		fp.err = err
 		fp.mu.Unlock()
@@ -504,8 +537,7 @@ func (fp *feePayment) receiveFeeAddress() error {
 
 	// verify initial request matches server
 	if !bytes.Equal(requestBody, response.Request) {
-		return fmt.Errorf("server response has differing request: %#v != %#v",
-			requestBody, response.Request)
+		return fmt.Errorf("server response contains differing request")
 	}
 
 	feeAmount := dcrutil.Amount(response.FeeAmount)
@@ -530,9 +562,8 @@ func (fp *feePayment) receiveFeeAddress() error {
 	return nil
 }
 
-// makeFeeTx adds outputs to tx to pay a VSP fee, optionally adding inputs as
-// well to fund the transaction if no input value is already provided in the
-// transaction.
+// makeFeeTx adds outputs to tx to pay a VSP fee, adding inputs when the supplied
+// value does not cover the quoted fee and transaction fee.
 //
 // If tx is nil, fp.feeTx may be assigned or modified, but the pointer will not
 // be dereferenced.
@@ -570,11 +601,33 @@ func (fp *feePayment) makeFeeTx(tx *wire.MsgTx) error {
 	}
 	// Fee transaction with outputs is already finished.
 	if fpFeeTx != nil && len(fpFeeTx.TxOut) != 0 {
-		return nil
+		feeHash := fpFeeTx.TxHash()
+		return w.UpdateVspTicketFeeToPaid(ctx, &fp.ticketHash, &feeHash, fp.client.url, fp.client.pub)
 	}
 	// When both transactions are nil, create a new empty transaction.
 	if tx == nil {
 		tx = wire.NewMsgTx()
+	}
+	// Keep the caller's reserved inputs intact if funding or signing fails.
+	// Added inputs belong to this attempt until the fee has been recorded.
+	providedTx := tx
+	tx = tx.Copy()
+	minconf := int32(1)
+	if len(tx.TxIn) != 0 {
+		// Purchase fees may need the unconfirmed change from their split.
+		minconf = 0
+	}
+	var reserved []wallet.Input
+	defer func() {
+		for _, in := range reserved {
+			w.UnlockOutpoint(&in.OutPoint.Hash, in.OutPoint.Index)
+		}
+	}()
+	for _, in := range tx.TxIn {
+		op := in.PreviousOutPoint
+		if w.TryLockOutpoint(&op.Hash, op.Index) {
+			reserved = append(reserved, wallet.Input{OutPoint: op})
+		}
 	}
 
 	// XXX fp.fee == -1?
@@ -589,37 +642,9 @@ func (fp *feePayment) makeFeeTx(tx *wire.MsgTx) error {
 		fp.mu.Unlock()
 	}
 
-	// Reserve new outputs to pay the fee if outputs have not already been
-	// reserved.  This will the the case for fee payments that were begun on
-	// already purchased tickets, where the caller did not ensure that fee
-	// outputs would already be reserved.
-	if len(tx.TxIn) == 0 {
-		const minconf = 1
-		inputs, err := w.ReserveOutputsForAmount(ctx, fp.policy.FeeAcct, fee, minconf)
-		if err != nil {
-			return fmt.Errorf("unable to reserve enough output value to "+
-				"pay VSP fee for ticket %v: %w", fp.ticketHash, err)
-		}
-		for _, in := range inputs {
-			tx.AddTxIn(wire.NewTxIn(&in.OutPoint, in.PrevOut.Value, nil))
-		}
-		// The transaction will be added to the wallet in an unpublished
-		// state, so there is no need to leave the outputs locked.
-		defer func() {
-			for _, in := range inputs {
-				w.UnlockOutpoint(&in.OutPoint.Hash, in.OutPoint.Index)
-			}
-		}()
-	}
-
 	var input int64
 	for _, in := range tx.TxIn {
 		input += in.ValueIn
-	}
-	if input < int64(fee) {
-		err := fmt.Errorf("not enough input value to pay fee: %v < %v",
-			dcrutil.Amount(input), fee)
-		return err
 	}
 
 	vers, feeScript := feeAddr.PaymentScript()
@@ -644,14 +669,44 @@ func (fp *feePayment) makeFeeTx(tx *wire.MsgTx) error {
 		PkScript: feeScript,
 	})
 	feeRate := w.RelayFee()
-	scriptSizes := make([]int, len(tx.TxIn))
-	for i := range scriptSizes {
-		scriptSizes[i] = txsizes.RedeemP2PKHSigScriptSize
+	var change int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		scriptSizes := make([]int, len(tx.TxIn))
+		for i := range scriptSizes {
+			scriptSizes[i] = txsizes.RedeemP2PKHSigScriptSize
+		}
+		est := txsizes.EstimateSerializeSize(scriptSizes, tx.TxOut, txsizes.P2PKHPkScriptSize)
+		maxSize := w.ChainParams().MaxTxSize
+		if w.ChainParams().Net == wire.MainNet {
+			maxSize = min(maxSize, 100000)
+		}
+		if est > maxSize {
+			return fmt.Errorf("VSP fee transaction exceeds maximum relay size")
+		}
+		change = input - int64(fee) - int64(txrules.FeeForSerializeSize(feeRate, est))
+		if change >= 0 && len(tx.TxIn) != 0 {
+			break
+		}
+		// The provider quotes after the ticket is published. Fund a changed
+		// quote and the relay cost of any additional inputs from this account.
+		needed := dcrutil.Amount(max(-change, 1))
+		inputs, err := w.ReserveOutputsForAmount(ctx, fp.policy.FeeAcct, needed, minconf)
+		if err != nil {
+			return fmt.Errorf("unable to reserve enough output value to "+
+				"pay VSP fee for ticket %v: %w", fp.ticketHash, err)
+		}
+		reserved = append(reserved, inputs...)
+		if len(inputs) == 0 {
+			return fmt.Errorf("no spendable inputs for VSP fee")
+		}
+		for _, in := range inputs {
+			tx.AddTxIn(wire.NewTxIn(&in.OutPoint, in.PrevOut.Value, nil))
+			input += in.PrevOut.Value
+		}
 	}
-	est := txsizes.EstimateSerializeSize(scriptSizes, tx.TxOut, txsizes.P2PKHPkScriptSize)
-	change := input
-	change -= tx.TxOut[0].Value
-	change -= int64(txrules.FeeForSerializeSize(feeRate, est))
 	if !txrules.IsDustAmount(dcrutil.Amount(change), txsizes.P2PKHPkScriptSize, feeRate) {
 		changeOut.Value = change
 		tx.TxOut = append(tx.TxOut, changeOut)
@@ -678,26 +733,19 @@ func (fp *feePayment) makeFeeTx(tx *wire.MsgTx) error {
 		return errors.New(sigErrStr)
 	}
 
-	err = w.SetPublished(ctx, &feeHash, false)
-	if err != nil {
+	recorded, err := w.RecordVSPFee(ctx, &fp.ticketHash, tx, fp.client.url, fp.client.pub)
+	if !recorded {
 		return err
 	}
-	err = w.AddTransaction(ctx, tx, nil)
-	if err != nil {
-		return err
-	}
-	err = w.UpdateVspTicketFeeToPaid(ctx, &fp.ticketHash, &feeHash, fp.client.url, fp.client.pub)
-	if err != nil {
-		return err
-	}
-
+	// A filter update can fail after storage commits. Keep this exact payment
+	// in memory as well as the database, so retry cannot replace it.
 	fp.mu.Lock()
-	fp.feeTx = tx
+	*providedTx = *tx
+	fp.feeTx = providedTx
 	fp.feeHash = feeHash
 	fp.mu.Unlock()
 
-	// nothing scheduled
-	return nil
+	return err
 }
 
 type ticketStatus struct {
@@ -749,8 +797,6 @@ func (c *Client) status(ctx context.Context, ticketHash *chainhash.Hash) (*ticke
 
 	// verify initial request matches server
 	if !bytes.Equal(requestBody, resp.Request) {
-		log.Warnf("server response has differing request: %#v != %#v",
-			requestBody, resp.Request)
 		return nil, fmt.Errorf("server response contains differing request")
 	}
 
@@ -815,8 +861,6 @@ func (c *Client) setVoteChoices(ctx context.Context, ticketHash *chainhash.Hash,
 
 	// verify initial request matches server
 	if !bytes.Equal(requestBody, resp.Request) {
-		log.Warnf("server response has differing request: %#v != %#v",
-			requestBody, resp.Request)
 		return fmt.Errorf("server response contains differing request")
 	}
 
@@ -867,6 +911,8 @@ func (fp *feePayment) reconcilePayment() error {
 						}
 					}
 				}
+			} else if !errors.Is(err, errMissingFee) && !errors.Is(err, errStopped) {
+				fp.schedule("reconcile payment", fp.reconcilePayment)
 			}
 			return err
 		}
@@ -901,7 +947,7 @@ func (fp *feePayment) reconcilePayment() error {
 			}
 			err = nil
 		case codeInvalidFeeTx, codeCannotBroadcastFee:
-			err := w.UpdateVspTicketFeeToErrored(ctx, &fp.ticketHash, fp.client.url, fp.client.pub)
+			err := w.ResetVSPTicketFee(ctx, &fp.ticketHash, &feeHash, fp.client.url, fp.client.pub)
 			if err != nil {
 				return err
 			}
@@ -909,6 +955,8 @@ func (fp *feePayment) reconcilePayment() error {
 			fp.mu.Lock()
 			fp.feeHash = chainhash.Hash{}
 			fp.feeTx = nil
+			fp.fee = 0
+			fp.feeAddr = nil
 			fp.mu.Unlock()
 			// err not nilled, so reconcile payment is rescheduled.
 		}
@@ -1011,16 +1059,17 @@ func (fp *feePayment) submitPayment() (err error) {
 	if err != nil {
 		var apiErr *BadRequestError
 		if errors.As(err, &apiErr) && apiErr.Code == codeFeeExpired {
-			// Fee has been expired, so abandon current feetx, set fp.feeTx
-			// to nil and retry submit payment to make a new fee tx.
 			feeHash := feeTx.TxHash()
-			err := w.AbandonTransaction(ctx, &feeHash)
-			if err != nil {
-				log.Errorf("error abandoning expired fee tx %v", err)
+			if resetErr := w.ResetVSPTicketFee(ctx, &fp.ticketHash, &feeHash, fp.client.url, fp.client.pub); resetErr != nil {
+				return fmt.Errorf("payfee: %w; could not reset expired fee: %w", err, resetErr)
 			}
 			fp.mu.Lock()
 			fp.feeTx = nil
+			fp.feeHash = chainhash.Hash{}
+			fp.fee = 0
+			fp.feeAddr = nil
 			fp.mu.Unlock()
+			fp.schedule("reconcile payment", fp.reconcilePayment)
 		}
 		return fmt.Errorf("payfee: %w", err)
 	}
@@ -1029,8 +1078,7 @@ func (fp *feePayment) submitPayment() (err error) {
 	// This is signed by the VSP, and the signature
 	// has already been checked above.
 	if !bytes.Equal(requestBody, payfeeResponse.Request) {
-		return fmt.Errorf("server response has differing request: %#v != %#v",
-			requestBody, payfeeResponse.Request)
+		return fmt.Errorf("server response contains differing request")
 	}
 	// TODO - validate server timestamp?
 

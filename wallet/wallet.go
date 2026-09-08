@@ -4382,6 +4382,19 @@ func (w *Wallet) LockOutpoint(txHash *chainhash.Hash, index uint32) {
 	w.lockedOutpointMu.Unlock()
 }
 
+// TryLockOutpoint locks an outpoint only if it was not already locked, and
+// reports whether the caller acquired the reservation.
+func (w *Wallet) TryLockOutpoint(txHash *chainhash.Hash, index uint32) bool {
+	op := outpoint{*txHash, index}
+	w.lockedOutpointMu.Lock()
+	defer w.lockedOutpointMu.Unlock()
+	if _, locked := w.lockedOutpoints[op]; locked {
+		return false
+	}
+	w.lockedOutpoints[op] = struct{}{}
+	return true
+}
+
 // UnlockOutpoint marks an outpoint as unlocked, that is, it may be used as an
 // input for newly created transactions.
 func (w *Wallet) UnlockOutpoint(txHash *chainhash.Hash, index uint32) {
@@ -5802,18 +5815,17 @@ func (w *Wallet) UpdateVspTicketFeeToStarted(ctx context.Context, ticketHash, fe
 }
 
 func (w *Wallet) UpdateVspTicketFeeToErrored(ctx context.Context, ticketHash *chainhash.Hash, host string, pubkey []byte) error {
-	var err error
-	err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
-		err = w.setVSPTicket(dbtx, ticketHash, &udb.VSPTicket{
-			FeeHash:     chainhash.Hash{},
-			FeeTxStatus: uint32(udb.VSPFeeProcessErrored),
-			Host:        host,
-			PubKey:      pubkey,
-		})
-		return err
+	return walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
+		record, err := udb.GetVSPTicket(dbtx, *ticketHash)
+		if err != nil && !errors.Is(err, errors.NotExist) {
+			return err
+		}
+		if record == nil || record.FeeHash == (chainhash.Hash{}) {
+			record = &udb.VSPTicket{Host: host, PubKey: pubkey}
+		}
+		record.FeeTxStatus = uint32(udb.VSPFeeProcessErrored)
+		return w.setVSPTicket(dbtx, ticketHash, record)
 	})
-
-	return err
 }
 
 func (w *Wallet) UpdateVspTicketFeeToConfirmed(ctx context.Context, ticketHash, feeHash *chainhash.Hash, host string, pubkey []byte) error {

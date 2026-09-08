@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2019 The Decred developers
+// Copyright (c) 2018-2026 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,15 +9,15 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/p2p"
-	"github.com/EXCCoin/exccwallet/v2/validate"
-	"github.com/EXCCoin/exccwallet/v2/wallet"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
 	"github.com/EXCCoin/exccd/gcs/v3"
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/p2p"
+	"github.com/EXCCoin/exccwallet/v2/validate"
+	"github.com/EXCCoin/exccwallet/v2/wallet"
 )
 
 var _ wallet.NetworkBackend = (*Syncer)(nil)
@@ -29,6 +29,29 @@ var _ wallet.NetworkBackend = (*Syncer)(nil)
 
 func pickAny(*p2p.RemotePeer) bool { return true }
 
+// blocksFromPeer verifies transaction trees before returning peer-supplied
+// blocks. Matching a requested hash only authenticates the block header.
+func blocksFromPeer(ctx context.Context, rp *p2p.RemotePeer, hashes []*chainhash.Hash) ([]*wire.MsgBlock, error) {
+	blocks, err := rp.Blocks(ctx, hashes)
+	if err != nil {
+		return nil, err
+	}
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		err := validate.MerkleRoots(block)
+		if err != nil {
+			err = validate.DCP0005MerkleRoot(block)
+		}
+		if err != nil {
+			rp.Disconnect(err)
+			return nil, err
+		}
+	}
+	return blocks, nil
+}
+
 // Blocks implements the Blocks method of the wallet.Peer interface.
 func (s *Syncer) Blocks(ctx context.Context, blockHashes []*chainhash.Hash) ([]*wire.MsgBlock, error) {
 	for {
@@ -39,7 +62,7 @@ func (s *Syncer) Blocks(ctx context.Context, blockHashes []*chainhash.Hash) ([]*
 		if err != nil {
 			return nil, err
 		}
-		blocks, err := rp.Blocks(ctx, blockHashes)
+		blocks, err := blocksFromPeer(ctx, rp, blockHashes)
 		if err != nil {
 			continue
 		}
@@ -241,33 +264,13 @@ FilterLoop:
 					}
 				}
 
-				blocks, err := rp.Blocks(ctx, fmatches)
+				blocks, err := blocksFromPeer(ctx, rp, fmatches)
 				if err != nil {
 					rp = nil
 					continue PickPeer
 				}
 
 				for j, b := range blocks {
-					// Validate fetched blocks before rescanning transactions.  PoW
-					// and PoS difficulties have already been validated since the
-					// header is saved by the wallet, and modifications to these in
-					// the downloaded block would result in a different block hash
-					// and failure to fetch the block.
-					//
-					// Block filters were also validated
-					// against the header (assuming dcp0005
-					// was activated).
-					err = validate.MerkleRoots(b)
-					if err != nil {
-						err = validate.DCP0005MerkleRoot(b)
-					}
-					if err != nil {
-						err := errors.E(op, err)
-						rp.Disconnect(err)
-						rp = nil
-						continue PickPeer
-					}
-
 					i := fmatchidx[j]
 					blockMatches[i] = b
 				}

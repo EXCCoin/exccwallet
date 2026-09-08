@@ -1,5 +1,5 @@
 // Copyright (c) 2013-2015 The btcsuite developers
-// Copyright (c) 2015-2021 The Decred developers
+// Copyright (c) 2015-2026 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,11 +10,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/EXCCoin/exccwallet/v2/deployments"
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
-	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
-	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 	"github.com/EXCCoin/exccd/blockchain/stake/v4"
 	blockchain "github.com/EXCCoin/exccd/blockchain/standalone/v2"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
@@ -23,6 +18,11 @@ import (
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 	"github.com/EXCCoin/exccd/txscript/v4/stdscript"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/deployments"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
+	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 )
 
 func (w *Wallet) extendMainChain(ctx context.Context, op errors.Op, dbtx walletdb.ReadWriteTx,
@@ -361,24 +361,47 @@ func (w *Wallet) evaluateStakePoolTicket(rec *udb.TxRecord, blockHeight int32, p
 // configured in manual ticket mode.  It is up to network syncers to avoid
 // calling this method on unmined tickets.
 func (w *Wallet) AddTransaction(ctx context.Context, tx *wire.MsgTx, blockHash *chainhash.Hash) error {
+	_, err := w.addTransaction(ctx, tx, blockHash, nil)
+	return err
+}
+
+func (w *Wallet) addTransaction(ctx context.Context, tx *wire.MsgTx, blockHash *chainhash.Hash,
+	beforeRecord func(walletdb.ReadWriteTx) error) (bool, error) {
+
 	const op errors.Op = "wallet.AddTransaction"
 
 	w.recentlyPublishedMu.Lock()
 	_, recent := w.recentlyPublished[tx.TxHash()]
 	w.recentlyPublishedMu.Unlock()
-	if recent {
-		return nil
+	if recent && beforeRecord == nil {
+		return false, nil
 	}
 
 	// Prevent recording unmined tspends since they need to go through
 	// voting for potentially a long time.
 	if isTreasurySpend(tx) && blockHash == nil {
 		log.Debugf("Ignoring unmined TSPend %s", tx.TxHash())
-		return nil
+		return false, nil
+	}
+
+	// Automatic revocations have no input signature. Defer them until mined.
+	if blockHash == nil && tx.Version >= stake.TxVersionAutoRevocations && stake.IsSSRtx(tx, false) {
+		return false, nil
 	}
 
 	w.lockedOutpointMu.Lock()
+	var reserved []outpoint
+	if beforeRecord != nil {
+		for _, input := range tx.TxIn {
+			prev := input.PreviousOutPoint
+			op := outpoint{prev.Hash, prev.Index}
+			if _, locked := w.lockedOutpoints[op]; locked {
+				reserved = append(reserved, op)
+			}
+		}
+	}
 	var watchOutPoints []wire.OutPoint
+	var notifyCommitted func()
 	err := walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
 		txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
 
@@ -418,17 +441,60 @@ func (w *Wallet) AddTransaction(ctx context.Context, tx *wire.MsgTx, blockHash *
 			}
 		}
 
-		watchOutPoints, err = w.processTransactionRecord(ctx, dbtx, rec, header, meta)
+		// Unmined announcements are not consensus-validated. A peer must
+		// prove any input spending one of our unspent outputs before it
+		// can change the wallet's view of which coins remain spendable.
+		if header == nil {
+			for i, in := range rec.MsgTx.TxIn {
+				prevOut := &in.PreviousOutPoint
+				credit, err := w.txStore.UnspentOutput(txmgrNs, *prevOut, true)
+				if errors.Is(err, errors.NotExist) {
+					continue
+				}
+				if err != nil {
+					return errors.E(op, err)
+				}
+				// Database output keys do not include the transaction tree.
+				if credit.OutPoint != *prevOut {
+					return errors.E(op, errors.ScriptFailure, errors.Errorf(
+						"input %d spends %v from the wrong transaction tree", i, prevOut))
+				}
+				// ValueIn need not be populated for unmined transactions.
+				if err := validateTxInput(op, &rec.MsgTx, i, credit.PkScript); err != nil {
+					return err
+				}
+			}
+		}
+
+		if beforeRecord != nil {
+			if err := beforeRecord(dbtx); err != nil {
+				return err
+			}
+		}
+		notify := w.NtfnServer.notifyUnminedTransaction
+		if beforeRecord != nil {
+			notify = func(dbtx walletdb.ReadTx, details *udb.TxDetails) {
+				notifyCommitted = w.NtfnServer.prepareUnminedTransaction(dbtx, details)
+			}
+		}
+		watchOutPoints, err = w.processTransactionRecordWithNotification(ctx, dbtx, rec, header, meta, notify)
 		return err
 	})
+	if err != nil {
+		for _, op := range reserved {
+			w.lockedOutpoints[op] = struct{}{}
+		}
+	} else if notifyCommitted != nil {
+		notifyCommitted()
+	}
 	w.lockedOutpointMu.Unlock()
 	if err != nil {
-		return errors.E(op, err)
+		return false, errors.E(op, err)
 	}
 	if n, err := w.NetworkBackend(); err == nil && len(watchOutPoints) > 0 {
 		_, err := w.watchHDAddrs(ctx, false, n)
 		if err != nil {
-			return errors.E(op, err)
+			return true, errors.E(op, err)
 		}
 		if len(watchOutPoints) > 0 {
 			err = n.LoadTxFilter(ctx, false, nil, watchOutPoints)
@@ -437,11 +503,19 @@ func (w *Wallet) AddTransaction(ctx context.Context, tx *wire.MsgTx, blockHash *
 			}
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func (w *Wallet) processTransactionRecord(ctx context.Context, dbtx walletdb.ReadWriteTx, rec *udb.TxRecord,
-	header *wire.BlockHeader, blockMeta *udb.BlockMeta) (watchOutPoints []wire.OutPoint, err error) {
+	header *wire.BlockHeader, blockMeta *udb.BlockMeta) ([]wire.OutPoint, error) {
+
+	return w.processTransactionRecordWithNotification(ctx, dbtx, rec, header, blockMeta,
+		w.NtfnServer.notifyUnminedTransaction)
+}
+
+func (w *Wallet) processTransactionRecordWithNotification(ctx context.Context, dbtx walletdb.ReadWriteTx,
+	rec *udb.TxRecord, header *wire.BlockHeader, blockMeta *udb.BlockMeta,
+	notifyUnmined func(walletdb.ReadTx, *udb.TxDetails)) (watchOutPoints []wire.OutPoint, err error) {
 
 	const op errors.Op = "wallet.processTransactionRecord"
 
@@ -804,7 +878,7 @@ func (w *Wallet) processTransactionRecord(ctx context.Context, dbtx walletdb.Rea
 		if err != nil {
 			log.Errorf("Cannot query transaction details for notifiation: %v", err)
 		} else {
-			w.NtfnServer.notifyUnminedTransaction(dbtx, details)
+			notifyUnmined(dbtx, details)
 		}
 	} else {
 		details, err := w.txStore.UniqueTxDetails(txmgrNs, &rec.Hash, &blockMeta.Block)

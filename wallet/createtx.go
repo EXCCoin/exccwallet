@@ -693,24 +693,25 @@ func (w *Wallet) txToMultisigInternal(ctx context.Context, op errors.Op, dbtx wa
 	return created, scAddr, msScript, nil
 }
 
-// validateMsgTx verifies transaction input scripts for tx.  All previous output
-// scripts from outputs redeemed by the transaction, in the same order they are
-// spent, must be passed in the prevScripts slice.
+// validateTxInput verifies that input i satisfies the previous output script.
+func validateTxInput(op errors.Op, tx *wire.MsgTx, i int, prevScript []byte) error {
+	vm, err := txscript.NewEngine(prevScript, tx, i,
+		sanityVerifyFlags, scriptVersionAssumed, nil)
+	if err != nil {
+		return errors.E(op, errors.ScriptFailure, err)
+	}
+	if err := vm.Execute(); err != nil {
+		return errors.E(op, errors.ScriptFailure, err)
+	}
+	return nil
+}
+
+// validateMsgTx verifies transaction input scripts for tx. All previous output
+// scripts must be supplied in the same order as the inputs which spend them.
 func validateMsgTx(op errors.Op, tx *wire.MsgTx, prevScripts [][]byte) error {
 	for i, prevScript := range prevScripts {
-		vm, err := txscript.NewEngine(prevScript, tx, i,
-			sanityVerifyFlags, scriptVersionAssumed, nil)
-		if err != nil {
-			return errors.E(op, err)
-		}
-		err = vm.Execute()
-		if err != nil {
-			prevOut := &tx.TxIn[i].PreviousOutPoint
-			sigScript := tx.TxIn[i].SignatureScript
-
-			log.Errorf("Script validation failed (outpoint %v pkscript %x sigscript %x): %v",
-				prevOut, prevScript, sigScript, err)
-			return errors.E(op, errors.ScriptFailure, err)
+		if err := validateTxInput(op, tx, i, prevScript); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1094,7 +1095,7 @@ func (w *Wallet) mixedSplit(ctx context.Context, req *PurchaseTicketsRequest, ne
 	return splitTx, cj.mixOutputIndexes(), nil
 }
 
-func (w *Wallet) individualSplit(ctx context.Context, req *PurchaseTicketsRequest, neededPerTicket dcrutil.Amount) (tx *wire.MsgTx, outIndexes []int, err error) {
+func (w *Wallet) individualSplit(ctx context.Context, req *PurchaseTicketsRequest, neededPerTicket, feePerTicket dcrutil.Amount) (tx *wire.MsgTx, outIndexes []int, feeCredits [][]Input, err error) {
 	// Fetch the single use split address to break tickets into, to
 	// immediately be consumed as tickets.
 	//
@@ -1106,19 +1107,25 @@ func (w *Wallet) individualSplit(ctx context.Context, req *PurchaseTicketsReques
 
 	vers, splitPkScript := splitTxAddr.PaymentScript()
 
-	// Create the split transaction by using txToOutputs. This varies
-	// based upon whether or not the user is using a stake pool or not.
-	// For the default stake pool implementation, the user pays out the
-	// first ticket commitment of a smaller amount to the pool, while
-	// paying themselves with the larger ticket commitment.
+	// Fund each ticket and, when requested, a separate wallet-owned output
+	// reserved for its VSP fee.
 	var splitOuts []*wire.TxOut
+	var feeIndexes []uint32
 	for i := 0; i < req.Count; i++ {
+		outIndexes = append(outIndexes, len(splitOuts))
 		splitOuts = append(splitOuts, &wire.TxOut{
 			Value:    int64(neededPerTicket),
 			PkScript: splitPkScript,
 			Version:  vers,
 		})
-		outIndexes = append(outIndexes, i)
+		if feePerTicket > 0 {
+			feeIndexes = append(feeIndexes, uint32(len(splitOuts)))
+			splitOuts = append(splitOuts, &wire.TxOut{
+				Value:    int64(feePerTicket),
+				PkScript: splitPkScript,
+				Version:  vers,
+			})
+		}
 	}
 
 	const op errors.Op = "individualSplit"
@@ -1136,6 +1143,19 @@ func (w *Wallet) individualSplit(ctx context.Context, req *PurchaseTicketsReques
 	if err != nil {
 		return
 	}
+	tx = a.atx.Tx
+	hash := tx.TxHash()
+	for _, index := range feeIndexes {
+		input := Input{
+			OutPoint: wire.OutPoint{Hash: hash, Index: index, Tree: wire.TxTreeRegular},
+			PrevOut:  *tx.TxOut[index],
+		}
+		// Reserve fee outputs before recording the transaction makes them
+		// available for selection.
+		// The purchase caller releases reservations on failure or cancellation.
+		w.LockOutpoint(&hash, index)
+		feeCredits = append(feeCredits, []Input{input})
+	}
 	err = w.recordAuthoredTx(ctx, op, a)
 	if err != nil {
 		return
@@ -1147,7 +1167,6 @@ func (w *Wallet) individualSplit(ctx context.Context, req *PurchaseTicketsReques
 		}
 	}
 
-	tx = a.atx.Tx
 	return
 }
 
@@ -1400,6 +1419,9 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 	}()
 
 	var vspFeeCredits, ticketCredits [][]Input
+	splitVSPFees := req.VSPFeePaymentProcess != nil && req.CSPPServer == "" &&
+		poolAddress == nil && !req.DontSignTx
+	var splitFeeAmount dcrutil.Amount
 	unlockCredits := true
 	total := func(ins []Input) (v int64) {
 		for _, in := range ins {
@@ -1421,9 +1443,26 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 		if err != nil {
 			return nil, err
 		}
-		fee := txrules.StakePoolTicketFee(ticketPrice, ticketFee,
+		vspTicketFee := ticketFee
+		if splitVSPFees && vspTicketFee < 1e4 {
+			// The VSP quote uses a fixed 0.0001 EXCC ticket-fee estimate.
+			vspTicketFee = 1e4
+		}
+		fee := txrules.StakePoolTicketFee(ticketPrice, vspTicketFee,
 			int32(tipHeight), feePrice, w.chainParams,
 			dcp0010Active)
+		if splitVSPFees {
+			// Each fee spends its own split output. Include the relay allowance
+			// used by VSP fee construction, including a possible change output.
+			feeSize := txsizes.EstimateSerializeSizeFromScriptSizes(
+				[]int{txsizes.RedeemP2PKHSigScriptSize},
+				[]int{txsizes.P2PKHPkScriptSize}, txsizes.P2PKHPkScriptSize)
+			splitFeeAmount = fee + txrules.FeeForSerializeSize(ticketRelayFee, feeSize)
+			if txrules.IsDustAmount(splitFeeAmount, txsizes.P2PKHPkScriptSize, ticketRelayFee) {
+				splitFeeAmount = ticketRelayFee
+			}
+			splitVSPFees = splitFeeAmount > 0
+		}
 
 		// Reserve outputs for number of buys.
 		vspFeeCredits = make([][]Input, 0, req.Count)
@@ -1446,7 +1485,7 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 			w.LockOutpoint(&op.Hash, op.Index)
 		}
 		var lowBalance bool
-		for i := 0; i < req.Count; i++ {
+		for i := 0; i < req.Count && !splitVSPFees; i++ {
 			if req.extraSplitOutput == nil {
 				credits, err := w.ReserveOutputsForAmount(ctx,
 					req.SourceAccount, fee, req.MinConf)
@@ -1547,7 +1586,7 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 				return nil, errVSPFeeRequiresUTXOSplit
 			}
 		}
-		log.Infof("Reserved credits for %d tickets: total fee: %v", req.Count, fee)
+		log.Infof("Preparing VSP funding for up to %d tickets: fee per ticket: %v", req.Count, fee)
 		for _, credit := range vspFeeCredits {
 			for _, c := range credit {
 				log.Debugf("%s reserved for vsp fee transaction", c.OutPoint.String())
@@ -1600,7 +1639,11 @@ func (w *Wallet) purchaseTickets(ctx context.Context, op errors.Op,
 		case req.VSPAddress != nil:
 			splitTx, splitOutputIndexes, err = w.vspSplit(ctx, req, neededPerTicket, vspFee)
 		default:
-			splitTx, splitOutputIndexes, err = w.individualSplit(ctx, req, neededPerTicket)
+			var feeCredits [][]Input
+			splitTx, splitOutputIndexes, feeCredits, err = w.individualSplit(ctx, req, neededPerTicket, splitFeeAmount)
+			if splitVSPFees {
+				vspFeeCredits = feeCredits
+			}
 		}
 		if errors.Is(err, errors.InsufficientBalance) && req.Count > 1 {
 			req.Count--
