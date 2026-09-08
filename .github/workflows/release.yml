@@ -284,9 +284,17 @@ jobs:
         run: |
           set -euo pipefail
           verify_tag_ref() {
+            local ref ref_type ref_sha depth
             ref=$(gh api "repos/${GH_REPO}/git/ref/tags/${GITHUB_REF_NAME}")
-            ref_type=$(jq -r '.object.type' <<< "${ref}")
-            ref_sha=$(jq -r '.object.sha' <<< "${ref}")
+            for depth in 0 1 2 3 4; do
+              ref_type=$(jq -r '.object.type' <<< "${ref}")
+              ref_sha=$(jq -r '.object.sha' <<< "${ref}")
+              if [ "${ref_type}" != tag ] || [ "${depth}" -eq 4 ] || \
+                 ! [[ "${ref_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+                break
+              fi
+              ref=$(gh api "repos/${GH_REPO}/git/tags/${ref_sha}")
+            done
             if [ "${ref_type}" != commit ] || [ "${ref_sha}" != "${GITHUB_SHA}" ]; then
               echo "::error::${GITHUB_REF_NAME} resolves to ${ref_type} ${ref_sha}, expected commit ${GITHUB_SHA}."
               exit 1
