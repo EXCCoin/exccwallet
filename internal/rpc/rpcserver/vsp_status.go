@@ -3,9 +3,12 @@ package rpcserver
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"sort"
+	"sync"
+	"time"
 
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccwallet/v2/internal/loader"
@@ -28,7 +31,7 @@ type vspSnapshot struct {
 	vsps     []*pb.GetTrackedVSPTicketsResponse_VSP
 }
 
-func (s *walletServer) vspSnapshot(ctx context.Context) (*vspSnapshot, error) {
+func (s *walletServer) vspFeeSnapshot(ctx context.Context) (*vspSnapshot, error) {
 	records, present, err := s.wallet.VSPFeeRecords(ctx)
 	if err != nil {
 		return nil, err
@@ -42,7 +45,17 @@ func (s *walletServer) vspSnapshot(ctx context.Context) (*vspSnapshot, error) {
 		snapshot.counts[record.FeeTxStatus]++
 	}
 	sort.Slice(snapshot.hashes, func(i, j int) bool { return bytes.Compare(snapshot.hashes[i][:], snapshot.hashes[j][:]) < 0 })
-	jobHosts := make(map[chainhash.Hash]string)
+
+	tip, _ := s.wallet.MainChainTip(ctx)
+	snapshot.setRevision(tip)
+	return snapshot, nil
+}
+
+func (s *walletServer) vspSnapshot(ctx context.Context) (*vspSnapshot, error) {
+	snapshot, err := s.vspFeeSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for host, client := range loader.AllVSPs(s.wallet) {
 		jobs := marshalVSPTrackedTickets(client.TrackedTickets())
 		snapshot.vsps = append(snapshot.vsps, &pb.GetTrackedVSPTicketsResponse_VSP{Host: host, Tickets: jobs})
@@ -53,22 +66,14 @@ func (s *walletServer) vspSnapshot(ctx context.Context) (*vspSnapshot, error) {
 				return nil, status.Error(codes.FailedPrecondition, "a ticket has multiple VSP jobs")
 			}
 			snapshot.jobs[hash] = job
-			jobHosts[hash] = host
 		}
-	}
-	tip, _ := s.wallet.MainChainTip(ctx)
-	if err := snapshot.setRevision(tip, jobHosts); err != nil {
-		return nil, err
 	}
 	return snapshot, nil
 }
 
-func (snapshot *vspSnapshot) setRevision(tip chainhash.Hash, jobHosts map[chainhash.Hash]string) error {
-	jobHashes := make([]chainhash.Hash, 0, len(jobHosts))
-	for hash := range jobHosts {
-		jobHashes = append(jobHashes, hash)
-	}
-	sort.Slice(jobHashes, func(i, j int) bool { return bytes.Compare(jobHashes[i][:], jobHashes[j][:]) < 0 })
+// Only durable records and the chain tip must stay unchanged while precise
+// ticket lookups run. Job diagnostics are captured once and frozen with the result.
+func (snapshot *vspSnapshot) setRevision(tip chainhash.Hash) {
 	digest := sha256.New()
 	writeBytes := func(value []byte) {
 		var size [8]byte
@@ -92,50 +97,129 @@ func (snapshot *vspSnapshot) setRevision(tip chainhash.Hash, jobHosts map[chainh
 			writeBytes([]byte{value})
 		}
 	}
-	for _, hash := range jobHashes {
-		writeBytes(hash[:])
-		writeBytes([]byte(jobHosts[hash]))
-		payload, err := (proto.MarshalOptions{Deterministic: true}).Marshal(snapshot.jobs[hash])
-		if err != nil {
-			return err
-		}
-		writeBytes(payload)
-	}
 	snapshot.revision = digest.Sum(nil)
+}
+
+// The revision is an opaque handle to a completed, immutable status read.
+// A fresh first page always reads current state; continuation pages never mix it
+// with later updates. At most four reads and 64 MiB of encoded results are retained.
+const (
+	vspStatusSnapshotTTL      = time.Minute
+	maxVSPStatusSnapshots     = 4
+	maxVSPStatusSnapshotBytes = 64 << 20
+)
+
+type cachedVSPStatus struct {
+	response *pb.GetVSPStatusResponse
+	expires  time.Time
+	size     int
+}
+
+type vspStatusCache struct {
+	mu        sync.Mutex
+	snapshots []cachedVSPStatus
+}
+
+func (c *vspStatusCache) add(response *pb.GetVSPStatusResponse) error {
+	size := proto.Size(response)
+	if size > maxVSPStatusSnapshotBytes {
+		return status.Error(codes.ResourceExhausted, "VSP status snapshot is too large")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	kept := c.snapshots[:0]
+	total := size
+	for _, entry := range c.snapshots {
+		if now.Before(entry.expires) {
+			kept = append(kept, entry)
+			total += entry.size
+		}
+	}
+	clear(c.snapshots[len(kept):])
+	c.snapshots = kept
+	for len(c.snapshots) > 0 && (len(c.snapshots) >= maxVSPStatusSnapshots || total > maxVSPStatusSnapshotBytes) {
+		total -= c.snapshots[0].size
+		c.snapshots[0] = cachedVSPStatus{}
+		c.snapshots = c.snapshots[1:]
+	}
+	c.snapshots = append(c.snapshots, cachedVSPStatus{response: response, expires: now.Add(vspStatusSnapshotTTL), size: size})
 	return nil
 }
 
+func (c *vspStatusCache) get(revision []byte) (*pb.GetVSPStatusResponse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, entry := range c.snapshots {
+		if time.Now().Before(entry.expires) && bytes.Equal(entry.response.Revision, revision) {
+			return entry.response, nil
+		}
+	}
+	return nil, status.Error(codes.Aborted, "VSP status snapshot expired; restart from the first page")
+}
+
+func vspStatusPage(snapshot *pb.GetVSPStatusResponse, after []byte, size uint32) *pb.GetVSPStatusResponse {
+	rows := snapshot.Registrations
+	start := sort.Search(len(rows), func(i int) bool { return bytes.Compare(rows[i].TicketHash, after) > 0 })
+	end := min(start+int(size), len(rows))
+	page := &pb.GetVSPStatusResponse{
+		Started: snapshot.Started, Paid: snapshot.Paid, Errored: snapshot.Errored, Confirmed: snapshot.Confirmed,
+		Revision: snapshot.Revision, TrackingKnown: snapshot.TrackingKnown, Registrations: rows[start:end],
+	}
+	if len(after) == 0 {
+		page.Vsps = snapshot.Vsps
+	}
+	if end < len(rows) {
+		page.NextAfterTicketHash = rows[end-1].TicketHash
+	}
+	// Keep callers from mutating cached messages, including concurrent RPC encoders.
+	return proto.Clone(page).(*pb.GetVSPStatusResponse)
+}
+
 func (s *walletServer) GetVSPStatus(ctx context.Context, req *pb.GetVSPStatusRequest) (*pb.GetVSPStatusResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, translateError(err)
+	}
 	pageSize := req.PageSize
 	if pageSize == 0 {
 		pageSize = 200
 	}
-	if pageSize > 500 || (len(req.AfterTicketHash) != 0 && len(req.AfterTicketHash) != chainhash.HashSize) || (len(req.Revision) != 0 && len(req.Revision) != sha256.Size) {
+	if pageSize > 500 || (len(req.AfterTicketHash) != 0 && len(req.AfterTicketHash) != chainhash.HashSize) ||
+		(len(req.Revision) != 0 && len(req.Revision) != sha256.Size) || (len(req.AfterTicketHash) != 0 && len(req.Revision) == 0) {
 		return nil, status.Error(codes.InvalidArgument, "invalid VSP status page")
 	}
+	var snapshot *pb.GetVSPStatusResponse
+	var err error
+	if len(req.Revision) != 0 {
+		snapshot, err = s.vspStatus.get(req.Revision)
+	} else {
+		snapshot, err = s.buildVSPStatus(ctx)
+		if err == nil {
+			err = s.vspStatus.add(snapshot)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, translateError(err)
+	}
+	return vspStatusPage(snapshot, req.AfterTicketHash, pageSize), nil
+}
+
+func (s *walletServer) buildVSPStatus(ctx context.Context) (*pb.GetVSPStatusResponse, error) {
 	before, err := s.vspSnapshot(ctx)
 	if err != nil {
 		return nil, translateError(err)
 	}
-	if len(req.Revision) != 0 && !bytes.Equal(req.Revision, before.revision) {
-		return nil, status.Error(codes.Aborted, "VSP status changed between pages")
-	}
-	start := sort.Search(len(before.hashes), func(i int) bool { return bytes.Compare(before.hashes[i][:], req.AfterTicketHash) > 0 })
-	end := min(start+int(pageSize), len(before.hashes))
 	response := &pb.GetVSPStatusResponse{
 		Started: before.counts[0], Paid: before.counts[1], Errored: before.counts[2], Confirmed: before.counts[3],
-		Revision: before.revision, TrackingKnown: true,
-		Registrations: make([]*pb.VSPFeeRecord, end-start),
-	}
-	if len(req.AfterTicketHash) == 0 {
-		response.Vsps = before.vsps
-	}
-	if end < len(before.hashes) {
-		response.NextAfterTicketHash = append([]byte(nil), before.hashes[end-1][:]...)
+		TrackingKnown: true, Vsps: before.vsps,
+		Registrations: make([]*pb.VSPFeeRecord, len(before.hashes)),
 	}
 	group, lookupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(8)
-	for i, hash := range before.hashes[start:end] {
+	for i, hash := range before.hashes {
 		group.Go(func() error {
 			if err := lookupCtx.Err(); err != nil {
 				return err
@@ -165,12 +249,14 @@ func (s *walletServer) GetVSPStatus(ctx context.Context, req *pb.GetVSPStatusReq
 	if err := group.Wait(); err != nil {
 		return nil, translateError(err)
 	}
-	after, err := s.vspSnapshot(ctx)
+	after, err := s.vspFeeSnapshot(ctx)
 	if err != nil {
 		return nil, translateError(err)
 	}
 	if !bytes.Equal(before.revision, after.revision) {
 		return nil, status.Error(codes.Aborted, "VSP status changed during the read")
 	}
+	response.Revision = make([]byte, sha256.Size)
+	rand.Read(response.Revision)
 	return response, nil
 }

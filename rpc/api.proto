@@ -1440,7 +1440,8 @@ message GetTrackedVSPTicketsResponse {
 message GetVSPStatusRequest {
 	uint32 page_size = 1;
 	bytes after_ticket_hash = 2;
-	// Pass the previous page's revision to reject a changed snapshot.
+	// Pass the first page's opaque revision to continue the same frozen read.
+	// Omit it to refresh; an expired or evicted revision returns Aborted.
 	bytes revision = 3;
 }
 
@@ -1465,7 +1466,7 @@ message GetVSPStatusResponse {
 	bytes revision = 6;
 	bytes next_after_ticket_hash = 7;
 	bool tracking_known = 8;
-	// All current jobs, included only on the first page.
+	// Jobs captured for this snapshot, included only on the first page.
 	repeated GetTrackedVSPTicketsResponse.VSP vsps = 9;
 }
 

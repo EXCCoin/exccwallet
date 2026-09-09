@@ -12828,7 +12828,8 @@ type GetVSPStatusRequest struct {
 
 	PageSize        uint32 `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	AfterTicketHash []byte `protobuf:"bytes,2,opt,name=after_ticket_hash,json=afterTicketHash,proto3" json:"after_ticket_hash,omitempty"`
-	// Pass the previous page's revision to reject a changed snapshot.
+	// Pass the first page's opaque revision to continue the same frozen read.
+	// Omit it to refresh; an expired or evicted revision returns Aborted.
 	Revision []byte `protobuf:"bytes,3,opt,name=revision,proto3" json:"revision,omitempty"`
 }
 
@@ -13002,7 +13003,7 @@ type GetVSPStatusResponse struct {
 	Revision            []byte          `protobuf:"bytes,6,opt,name=revision,proto3" json:"revision,omitempty"`
 	NextAfterTicketHash []byte          `protobuf:"bytes,7,opt,name=next_after_ticket_hash,json=nextAfterTicketHash,proto3" json:"next_after_ticket_hash,omitempty"`
 	TrackingKnown       bool            `protobuf:"varint,8,opt,name=tracking_known,json=trackingKnown,proto3" json:"tracking_known,omitempty"`
-	// All current jobs, included only on the first page.
+	// Jobs captured for this snapshot, included only on the first page.
 	Vsps []*GetTrackedVSPTicketsResponse_VSP `protobuf:"bytes,9,rep,name=vsps,proto3" json:"vsps,omitempty"`
 }
 

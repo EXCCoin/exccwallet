@@ -3,7 +3,9 @@ package rpcserver
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -116,6 +118,22 @@ func TestVSPStatusPagesUseConsistentFeeRecords(t *testing.T) {
 		if len(cursor) == 0 {
 			break
 		}
+		// Change a later record after the first page. Continuation must retain
+		// the original values and counts, even though a fresh read sees it.
+		err = walletdb.Update(ctx, rawDB, func(dbtx walletdb.ReadWriteTx) error {
+			hash := chainhash.Hash{3}
+			return udb.SetVSPTicket(dbtx, &hash, &udb.VSPTicket{FeeTxStatus: uint32(udb.VSPFeeProcessPaid), Host: savedHost, PubKey: key})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	err = walletdb.Update(ctx, rawDB, func(dbtx walletdb.ReadWriteTx) error {
+		hash := chainhash.Hash{3}
+		return udb.SetVSPTicket(dbtx, &hash, &udb.VSPTicket{FeeTxStatus: uint32(udb.VSPFeeProcessErrored), Host: savedHost, PubKey: key})
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	if len(seen) != 4 {
 		t.Fatalf("got %d records", len(seen))
@@ -128,8 +146,14 @@ func TestVSPStatusPagesUseConsistentFeeRecords(t *testing.T) {
 	if err := w.AbandonTransaction(ctx, &rec.Hash); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetVSPStatus(ctx, &pb.GetVSPStatusRequest{Revision: revision}); status.Code(err) != codes.Aborted {
-		t.Fatalf("same-tip removal accepted the old revision: %v", err)
+	cached, err := s.GetVSPStatus(ctx, &pb.GetVSPStatusRequest{Revision: revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range cached.Registrations {
+		if bytes.Equal(entry.TicketHash, rec.Hash[:]) && entry.TicketMissing {
+			t.Fatal("cached read changed after removal")
+		}
 	}
 	missingPage, err := s.GetVSPStatus(ctx, &pb.GetVSPStatusRequest{})
 	if err != nil {
@@ -146,8 +170,14 @@ func TestVSPStatusPagesUseConsistentFeeRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetVSPStatus(ctx, &pb.GetVSPStatusRequest{Revision: missingPage.Revision}); status.Code(err) != codes.Aborted {
-		t.Fatalf("same-tip restoration accepted the old revision: %v", err)
+	restoredPage, err := s.GetVSPStatus(ctx, &pb.GetVSPStatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range restoredPage.Registrations {
+		if bytes.Equal(entry.TicketHash, rec.Hash[:]) && (entry.TicketMissing || !entry.TicketStatusKnown) {
+			t.Fatal("fresh read missed same-tip restoration")
+		}
 	}
 	if currentTip, _ := w.MainChainTip(ctx); currentTip != tip {
 		t.Fatal("presence regression changed the chain tip")
@@ -198,10 +228,14 @@ func TestVSPStatusPagesUseConsistentFeeRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetVSPStatus(ctx, &pb.GetVSPStatusRequest{Revision: revision}); status.Code(err) != codes.Aborted {
-		t.Fatalf("accepted stale revision: %v", err)
+	confirmedPage, err := s.GetVSPStatus(ctx, &pb.GetVSPStatusRequest{})
+	if err != nil || confirmedPage.Confirmed != 2 {
+		t.Fatalf("fresh read missed fee confirmation: %v, %v", confirmedPage, err)
 	}
-	for _, req := range []*pb.GetVSPStatusRequest{{PageSize: 501}, {AfterTicketHash: []byte{1}}, {Revision: []byte{1}}} {
+	if _, err := s.GetVSPStatus(ctx, &pb.GetVSPStatusRequest{Revision: bytes.Repeat([]byte{99}, 32)}); status.Code(err) != codes.Aborted {
+		t.Fatalf("accepted unknown snapshot: %v", err)
+	}
+	for _, req := range []*pb.GetVSPStatusRequest{{PageSize: 501}, {AfterTicketHash: []byte{1}}, {Revision: []byte{1}}, {AfterTicketHash: make([]byte, 32)}} {
 		if _, err := s.GetVSPStatus(ctx, req); status.Code(err) != codes.InvalidArgument {
 			t.Fatalf("accepted invalid page: %v", err)
 		}
@@ -229,38 +263,169 @@ func (c *failingVSPStatusCaller) Call(context.Context, string, interface{}, ...i
 	return errors.New("test node unavailable")
 }
 
-func TestVSPStatusRevisionIncludesJobDiagnostics(t *testing.T) {
-	hash := chainhash.Hash{1}
-	hosts := map[chainhash.Hash]string{hash: "https://vsp.example"}
-	base := &pb.GetTrackedVSPTicketsResponse_Ticket{TicketHash: hash[:]}
-	revision := func(job *pb.GetTrackedVSPTicketsResponse_Ticket) []byte {
-		snapshot := &vspSnapshot{jobs: map[chainhash.Hash]*pb.GetTrackedVSPTicketsResponse_Ticket{hash: job}}
-		if err := snapshot.setRevision(chainhash.Hash{}, hosts); err != nil {
+func TestVSPStatusSnapshotFreezesChangingJobsAcrossPages(t *testing.T) {
+	const count = 1200
+	hash := func(i int) []byte {
+		h := make([]byte, 32)
+		binary.BigEndian.PutUint32(h, uint32(i+1))
+		return h
+	}
+	live := &pb.GetVSPStatusResponse{Started: count, TrackingKnown: true, Revision: hash(9000)}
+	provider := &pb.GetTrackedVSPTicketsResponse_VSP{Host: "https://vsp.example"}
+	live.Vsps = []*pb.GetTrackedVSPTicketsResponse_VSP{provider}
+	for i := range count {
+		job := &pb.GetTrackedVSPTicketsResponse_Ticket{TicketHash: hash(i), Phase: "confirm payment", NextRetryUnix: 1}
+		provider.Tickets = append(provider.Tickets, job)
+		live.Registrations = append(live.Registrations, &pb.VSPFeeRecord{TicketHash: hash(i), Host: provider.Host, Job: job})
+	}
+	snapshot := proto.Clone(live).(*pb.GetVSPStatusResponse)
+	s := new(walletServer)
+	if err := s.vspStatus.add(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	done := make(chan struct{})
+	var updates atomic.Int32
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			mu.Lock()
+			for _, job := range provider.Tickets {
+				job.Phase = "retry payment"
+				job.NextRetryUnix++
+				job.LastError = "context deadline exceeded"
+			}
+			mu.Unlock()
+			updates.Add(1)
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	defer func() { close(done); wg.Wait() }()
+	var cursor []byte
+	var seen int
+	for {
+		page, err := s.GetVSPStatus(context.Background(), &pb.GetVSPStatusRequest{PageSize: 137, Revision: snapshot.Revision, AfterTicketHash: cursor})
+		if err != nil {
 			t.Fatal(err)
 		}
-		return snapshot.revision
+		if page.Started != count || !bytes.Equal(page.Revision, snapshot.Revision) {
+			t.Fatal("snapshot totals changed")
+		}
+		if seen == 0 && len(page.Vsps[0].Tickets) != count {
+			t.Fatal("first page omitted jobs")
+		}
+		if seen != 0 && len(page.Vsps) != 0 {
+			t.Fatal("later page repeated jobs")
+		}
+		for _, row := range page.Registrations {
+			if !bytes.Equal(row.TicketHash, hash(seen)) || row.Job.NextRetryUnix != 1 || row.Job.LastError != "" {
+				t.Fatal("mixed, omitted, or duplicated records")
+			}
+			seen++
+			row.Job.LastError = "caller mutated its own page"
+		}
+		cursor = page.NextAfterTicketHash
+		if len(cursor) == 0 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
-	before := revision(base)
-	for name, change := range map[string]func(*pb.GetTrackedVSPTicketsResponse_Ticket){
-		"phase":      func(job *pb.GetTrackedVSPTicketsResponse_Ticket) { job.Phase = "confirm payment" },
-		"failure":    func(job *pb.GetTrackedVSPTicketsResponse_Ticket) { job.LastError = "wallet is locked" },
-		"unlock":     func(job *pb.GetTrackedVSPTicketsResponse_Ticket) { job.NeedsUnlock = true },
-		"retry":      func(job *pb.GetTrackedVSPTicketsResponse_Ticket) { job.NextRetryUnix = 123 },
-		"fee":        func(job *pb.GetTrackedVSPTicketsResponse_Ticket) { job.Fee = 456 },
-		"fee hash":   func(job *pb.GetTrackedVSPTicketsResponse_Ticket) { job.FeeHash = []byte{2} },
-		"state":      func(job *pb.GetTrackedVSPTicketsResponse_Ticket) { job.State = 2 },
-		"voting":     func(job *pb.GetTrackedVSPTicketsResponse_Ticket) { job.VotingAddress = "test voting address" },
-		"commitment": func(job *pb.GetTrackedVSPTicketsResponse_Ticket) { job.CommitmentAddress = "test commitment address" },
-	} {
-		t.Run(name, func(t *testing.T) {
-			job := proto.Clone(base).(*pb.GetTrackedVSPTicketsResponse_Ticket)
-			change(job)
-			if bytes.Equal(before, revision(job)) {
-				t.Fatal("changed job retained the old revision")
-			}
-			if !bytes.Equal(revision(job), revision(job)) {
-				t.Fatal("unchanged job revision is unstable")
-			}
-		})
+	if seen != count || updates.Load() == 0 {
+		t.Fatalf("records %d, updates %d", seen, updates.Load())
+	}
+	mu.Lock()
+	fresh := proto.Clone(live).(*pb.GetVSPStatusResponse)
+	mu.Unlock()
+	fresh.Revision = hash(9001)
+	if err := s.vspStatus.add(fresh); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.GetVSPStatus(context.Background(), &pb.GetVSPStatusRequest{Revision: fresh.Revision})
+	if err != nil || page.Registrations[0].Job.LastError != "context deadline exceeded" {
+		t.Fatalf("fresh snapshot did not expose updates: %v", err)
+	}
+	old, err := s.GetVSPStatus(context.Background(), &pb.GetVSPStatusRequest{Revision: snapshot.Revision})
+	if err != nil || old.Registrations[0].Job.LastError != "" {
+		t.Fatal("refresh or caller mutation changed an active read")
+	}
+}
+
+func TestVSPStatusCacheExpiryAndBounds(t *testing.T) {
+	s := new(walletServer)
+	var first []byte
+	for i := range maxVSPStatusSnapshots + 1 {
+		revision := bytes.Repeat([]byte{byte(i + 1)}, 32)
+		if i == 0 {
+			first = revision
+		}
+		if err := s.vspStatus.add(&pb.GetVSPStatusResponse{Revision: revision}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(s.vspStatus.snapshots) != maxVSPStatusSnapshots {
+		t.Fatal("cache is unbounded")
+	}
+	if _, err := s.vspStatus.get(first); status.Code(err) != codes.Aborted {
+		t.Fatal("evicted snapshot remained usable")
+	}
+	entry := &s.vspStatus.snapshots[0]
+	entry.expires = time.Now().Add(-time.Second)
+	if _, err := s.vspStatus.get(entry.response.Revision); status.Code(err) != codes.Aborted {
+		t.Fatal("expired snapshot remained usable")
+	}
+	// Exercise the byte budget without allocating a large fixture.
+	for i := range s.vspStatus.snapshots {
+		s.vspStatus.snapshots[i].size = maxVSPStatusSnapshotBytes / 2
+	}
+	if err := s.vspStatus.add(&pb.GetVSPStatusResponse{Revision: bytes.Repeat([]byte{9}, 32)}); err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for _, entry := range s.vspStatus.snapshots {
+		total += entry.size
+	}
+	if total > maxVSPStatusSnapshotBytes {
+		t.Fatal("cache exceeded its byte budget")
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.GetVSPStatus(cancelled, &pb.GetVSPStatusRequest{Revision: s.vspStatus.snapshots[0].response.Revision}); status.Code(err) != codes.Canceled {
+		t.Fatal("cached read ignored cancellation")
+	}
+}
+
+func TestVSPStatusDurableRevisionIgnoresJobDiagnostics(t *testing.T) {
+	hash := chainhash.Hash{1}
+	snapshot := &vspSnapshot{hashes: []chainhash.Hash{hash}, records: map[chainhash.Hash]*udb.VSPTicket{hash: {Host: "https://vsp.example"}}, present: map[chainhash.Hash]bool{hash: true}, jobs: map[chainhash.Hash]*pb.GetTrackedVSPTicketsResponse_Ticket{hash: {TicketHash: hash[:]}}}
+	snapshot.setRevision(chainhash.Hash{})
+	before := bytes.Clone(snapshot.revision)
+	snapshot.jobs[hash].NextRetryUnix = 42
+	snapshot.jobs[hash].LastError = "temporary failure"
+	snapshot.setRevision(chainhash.Hash{})
+	if !bytes.Equal(before, snapshot.revision) {
+		t.Fatal("job diagnostics invalidated the durable read")
+	}
+	snapshot.present[hash] = false
+	snapshot.setRevision(chainhash.Hash{})
+	if bytes.Equal(before, snapshot.revision) {
+		t.Fatal("transaction presence change was ignored")
+	}
+	snapshot.present[hash] = true
+	snapshot.records[hash].FeeTxStatus = uint32(udb.VSPFeeProcessConfirmed)
+	snapshot.setRevision(chainhash.Hash{})
+	if bytes.Equal(before, snapshot.revision) {
+		t.Fatal("fee status change was ignored")
+	}
+	snapshot.records[hash].FeeTxStatus = 0
+	snapshot.setRevision(chainhash.Hash{2})
+	if bytes.Equal(before, snapshot.revision) {
+		t.Fatal("chain tip change was ignored")
 	}
 }

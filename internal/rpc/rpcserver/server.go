@@ -185,6 +185,7 @@ type versionServer struct{}
 
 // walletServer provides wallet services for RPC clients.
 type walletServer struct {
+	vspStatus      vspStatusCache
 	ready          bool
 	readyMtx       sync.RWMutex
 	wallet         *wallet.Wallet
