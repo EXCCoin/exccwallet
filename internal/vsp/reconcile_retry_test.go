@@ -97,7 +97,7 @@ func TestReconcileRetriesTopUpAfterEarlierFeePublication(t *testing.T) {
 		t.Fatal("first higher quote did not consume the split change")
 	}
 	// Execute the scheduled worker directly, without waiting for random jitter.
-	waiting.task("reconcile payment", waiting.reconcilePayment)()
+	waiting.testTask("reconcile payment", waiting.reconcilePayment)()
 	if !errors.Is(waiting.err, errors.InsufficientBalance) {
 		t.Fatalf("want unavailable unpublished change, got %v", waiting.err)
 	}
@@ -115,7 +115,7 @@ func TestReconcileRetriesTopUpAfterEarlierFeePublication(t *testing.T) {
 	if err := w.SetPublished(ctx, &first.feeHash, true); err != nil {
 		t.Fatal(err)
 	}
-	waiting.task("reconcile payment", waiting.reconcilePayment)()
+	waiting.testTask("reconcile payment", waiting.reconcilePayment)()
 	if waiting.err != nil || payments != 1 {
 		t.Fatalf("requeued fee did not recover after publication: %v, payments=%d", waiting.err, payments)
 	}

@@ -78,8 +78,15 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	client := newClient(host, pubKey, cfg.Wallet)
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
 	client.Transport = &http.Transport{
-		DialContext: cfg.Dialer,
+		DialContext:         cfg.Dialer,
+		Protocols:           protocols,
+		MaxConnsPerHost:     maxConcurrentManagedTickets,
+		MaxIdleConns:        maxConcurrentManagedTickets,
+		MaxIdleConnsPerHost: maxConcurrentManagedTickets,
+		IdleConnTimeout:     90 * time.Second,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -355,7 +362,7 @@ func (c *Client) Process(ctx context.Context, ticketHash *chainhash.Hash, feeTx 
 // ProcessWithPolicy is the same as Process but allows a fee payment policy to
 // be specified, instead of using the client's default policy.
 func (c *Client) ProcessWithPolicy(ctx context.Context, ticketHash *chainhash.Hash, feeTx *wire.MsgTx,
-	policy Policy) error {
+	policy Policy) (processErr error) {
 
 	vspTicket, err := c.Wallet.VSPTicketInfo(ctx, ticketHash)
 	if err != nil && !errors.Is(err, errors.NotExist) {
@@ -397,6 +404,14 @@ func (c *Client) ProcessWithPolicy(ctx context.Context, ticketHash *chainhash.Ha
 		return err
 	}
 	defer finish()
+	fp.mu.Lock()
+	fp.err = nil
+	fp.mu.Unlock()
+	defer func() {
+		fp.mu.Lock()
+		fp.err = processErr
+		fp.mu.Unlock()
+	}()
 
 	// A preceding task may have created or confirmed the fee while this request
 	// waited. Use the current durable state before contacting the provider again.
@@ -437,7 +452,11 @@ func (c *Client) ProcessWithPolicy(ctx context.Context, ticketHash *chainhash.Ha
 			}
 			return err
 		}
-		return fp.submitPayment()
+		if err := fp.submitPayment(); err != nil {
+			return err
+		}
+		fp.schedule("confirm payment", fp.confirmPayment)
+		return nil
 	case udb.VSPFeeProcessPaid:
 		// If a VSP ticket has been paid, but confirm payment.
 		if len(vspTicket.Host) > 0 && !c.sameProvider(vspTicket.Host, vspTicket.PubKey) {

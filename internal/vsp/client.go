@@ -64,9 +64,10 @@ func vspRedirect(req *http.Request, via []*http.Request) error {
 
 type client struct {
 	http.Client
-	url  string
-	pub  []byte
-	sign func(context.Context, string, stdaddr.Address) ([]byte, error)
+	url      string
+	pub      []byte
+	sign     func(context.Context, string, stdaddr.Address) ([]byte, error)
+	requests chan struct{}
 }
 
 type signer interface {
@@ -77,6 +78,7 @@ func newClient(url string, pub []byte, s signer) *client {
 	return &client{
 		Client: http.Client{Timeout: vspRequestTimeout, CheckRedirect: vspRedirect},
 		url:    url, pub: pub, sign: s.SignMessage,
+		requests: make(chan struct{}, maxConcurrentManagedTickets),
 	}
 }
 
@@ -97,6 +99,17 @@ func (c *client) get(ctx context.Context, path string, resp interface{}) error {
 }
 
 func (c *client) do(ctx context.Context, method, path string, addr stdaddr.Address, resp, req interface{}) error {
+	// Timer-driven jobs share the same limit as foreground VSP requests.
+	// Waiting for a slot does not consume the network request timeout.
+	select {
+	case c.requests <- struct{}{}:
+		defer func() { <-c.requests }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, vspRequestTimeout)
 	defer cancel()
 	if len(c.pub) != ed25519.PublicKeySize {

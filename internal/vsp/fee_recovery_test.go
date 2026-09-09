@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"runtime"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/txscript/v4"
+	"github.com/EXCCoin/exccd/txscript/v4/stdscript"
 	"github.com/EXCCoin/exccd/wire"
 	walletErrors "github.com/EXCCoin/exccwallet/v2/errors"
 	"github.com/EXCCoin/exccwallet/v2/wallet"
@@ -109,9 +111,6 @@ func TestSavedVSPFeeAcceptsCanonicalProviderAlias(t *testing.T) {
 	}
 	if err := w.UpdateVspTicketFeeToPaid(ctx, &hash, &feeHash, alias, pub); err != nil {
 		t.Fatal(err)
-	}
-	if err := w.ResetVSPTicketFee(ctx, &hash, &feeHash, canonical, pub); err != nil {
-		t.Fatalf("canonical alias could not reset the same payment: %v", err)
 	}
 }
 
@@ -227,8 +226,8 @@ func TestFeeConstructorDoesNotReplacePaymentAfterLookupFailure(t *testing.T) {
 	}
 }
 
-func TestExpiredFeeRecoveryIsDurableAndDoesNotReplaceAcceptedPayment(t *testing.T) {
-	for _, scenario := range []string{"expired", "reset rollback", "confirmed payment", "already received"} {
+func TestExpiredFeeRecoveryRetainsPaymentAndReplaysMatchingQuote(t *testing.T) {
+	for _, scenario := range []string{"changed quote", "matching quote", "increased quote", "duplicate matching outputs", "confirmed payment", "already received"} {
 		t.Run(scenario, func(t *testing.T) {
 			var gate *atomicFeeDB
 			driver := "vsp-test-expired-fee-" + t.TempDir()
@@ -264,6 +263,18 @@ func TestExpiredFeeRecoveryIsDurableAndDoesNotReplaceAcceptedPayment(t *testing.
 			pub, key := vspTestKeys()
 			c.pub = pub
 			fee := signedRecoveryFee(t, w, 155)
+			if scenario == "duplicate matching outputs" {
+				first := *fee.TxOut[0]
+				first.Value = 1
+				fee.TxOut = append([]*wire.TxOut{&first}, fee.TxOut...)
+				for _, input := range fee.TxIn {
+					input.SignatureScript = nil
+				}
+				sigErrors, err := w.SignTransaction(ctx, fee, txscript.SigHashAll, nil, nil, nil)
+				if err != nil || len(sigErrors) != 0 {
+					t.Fatalf("sign fee with duplicate outputs: %v %v", err, sigErrors)
+				}
+			}
 			feeHash := fee.TxHash()
 			if committed, err := w.RecordVSPFee(ctx, &hash, fee, c.url, c.pub); err != nil || !committed {
 				t.Fatal(err)
@@ -274,6 +285,7 @@ func TestExpiredFeeRecoveryIsDurableAndDoesNotReplaceAcceptedPayment(t *testing.
 				// already received, broadcast, or confirmed by the provider.
 				code = codeFeeAlreadyReceived
 			}
+			payments := 0
 			transport := vspTestTransport(func(req *http.Request) (*http.Response, error) {
 				body, err := io.ReadAll(req.Body)
 				if err != nil {
@@ -282,13 +294,40 @@ func TestExpiredFeeRecoveryIsDurableAndDoesNotReplaceAcceptedPayment(t *testing.
 				status := http.StatusBadRequest
 				var response interface{} = &BadRequestError{Code: code, Message: "provider rejected fee"}
 				if req.URL.Path == "/api/v3/feeaddress" {
+					quoteAddress := address.String()
+					quoteAmount := int64(35000)
+					if scenario == "matching quote" || scenario == "increased quote" || scenario == "duplicate matching outputs" {
+						_, addresses := stdscript.ExtractAddrs(fee.TxOut[0].Version, fee.TxOut[0].PkScript, w.ChainParams())
+						quoteAddress = addresses[0].String()
+					}
+					if scenario == "increased quote" {
+						quoteAmount = fee.TxOut[0].Value + 1
+					}
 					status = http.StatusOK
 					response = struct {
 						FeeAddress string `json:"feeaddress"`
 						FeeAmount  int64  `json:"feeamount"`
 						Request    []byte `json:"request"`
-					}{address.String(), 35000, body}
-				} else if req.URL.Path != "/api/v3/payfee" {
+					}{quoteAddress, quoteAmount, body}
+				} else if req.URL.Path == "/api/v3/payfee" {
+					payments++
+					var request struct {
+						FeeTx string `json:"feetx"`
+					}
+					if err := json.Unmarshal(body, &request); err != nil {
+						t.Fatal(err)
+					}
+					want, _ := fee.Bytes()
+					if request.FeeTx != fmt.Sprintf("%x", want) {
+						t.Fatal("retry changed the saved signed fee transaction")
+					}
+					if scenario == "matching quote" && payments == 2 {
+						status = http.StatusOK
+						response = struct {
+							Request []byte `json:"request"`
+						}{body}
+					}
+				} else {
 					t.Errorf("unexpected request %s", req.URL.Path)
 				}
 				data, err := json.Marshal(response)
@@ -311,36 +350,23 @@ func TestExpiredFeeRecoveryIsDurableAndDoesNotReplaceAcceptedPayment(t *testing.
 					t.Fatal(err)
 				}
 			}
-			resetAttempted := false
-			if scenario == "reset rollback" {
-				gate.beforeCommit = func(dbtx walletdb.ReadWriteTx) error {
-					info, err := udb.GetVSPTicket(dbtx, hash)
-					if err == nil && info.FeeHash == (chainhash.Hash{}) {
-						resetAttempted = true
-						return errFeeSave
-					}
-					return nil
-				}
-			}
 			err = fp.submitPayment()
 			var apiErr *BadRequestError
-			if !errors.As(err, &apiErr) || apiErr.Code != code {
+			if scenario == "matching quote" {
+				if err != nil || payments != 2 {
+					t.Fatalf("matching quote did not replay the exact payment: %v, payments=%d", err, payments)
+				}
+			} else if !errors.As(err, &apiErr) || apiErr.Code != code {
 				t.Fatalf("signed provider error was not preserved: %v", err)
 			}
-			fp.timerMu.Lock()
-			scheduled := fp.timer != nil && fp.phase == "reconcile payment" && !fp.nextRetry.IsZero()
-			fp.timerMu.Unlock()
-			fp.schedule("", nil)
-			cleared := scenario == "expired"
-			if cleared {
-				if fp.feeTx != nil || fp.feeHash != (chainhash.Hash{}) || fp.fee != 0 || fp.feeAddr != nil || !scheduled {
-					t.Fatal("expired quote was not cleared and rescheduled")
+			if scenario == "changed quote" || scenario == "increased quote" || scenario == "duplicate matching outputs" {
+				if payments != 1 || !strings.Contains(err.Error(), "retained for review") {
+					t.Fatalf("changed quote was not retained for review: %v, payments=%d", err, payments)
 				}
-			} else if fp.feeTx == nil || fp.feeHash != feeHash || fp.fee != 30000 || fp.feeAddr != address || scheduled {
-				t.Fatal("unreset payment or quote was replaced")
 			}
-			if scenario == "reset rollback" && (!resetAttempted || !errors.Is(err, errFeeSave)) {
-				t.Fatal("reset commit failure was not exercised")
+			fp.schedule("", nil)
+			if fp.feeTx == nil || fp.feeHash != feeHash {
+				t.Fatal("expired quote discarded the saved payment")
 			}
 			gate.beforeCommit = nil
 			c.Close()
@@ -361,29 +387,15 @@ func TestExpiredFeeRecoveryIsDurableAndDoesNotReplaceAcceptedPayment(t *testing.
 				t.Fatal(err)
 			}
 			txs, _, err := reopened.GetTransactionsByHashes(ctx, []*chainhash.Hash{&feeHash})
-			if cleared {
-				if info.FeeHash != (chainhash.Hash{}) || info.FeeTxStatus != uint32(udb.VSPFeeProcessErrored) || len(txs) != 0 || !errors.Is(err, walletErrors.NotExist) {
-					t.Fatalf("expired fee reset was not durable: %+v %v", info, err)
-				}
-				if err := reopened.Unlock(ctx, []byte("test-wallet-password"), nil); err != nil {
-					t.Fatal(err)
-				}
-				recovered := testFeeClient(reopened)
-				defer recovered.Close()
-				recovered.pub, recovered.Transport = pub, transport
-				job := recovered.feePaymentWithTx(&hash, Policy{MaxFee: 1e8}, false, nil)
-				if job == nil {
-					t.Fatal("expired payment could not restart")
-				}
-				job.schedule("", nil)
-				if job.blocked || job.feeTx != nil || job.feeHash != (chainhash.Hash{}) {
-					t.Fatal("expired payment restarted with stale transaction")
-				}
-				if err := job.receiveFeeAddress(); err != nil || job.fee != 35000 {
-					t.Fatalf("restart did not fetch a fresh quote: %v", err)
-				}
-			} else if err != nil || len(txs) != 1 || info.FeeHash != feeHash || len(txs[0].TxIn[0].SignatureScript) == 0 {
-				t.Fatalf("unreset signed fee did not survive reopen: %+v %v", info, err)
+			if err != nil || len(txs) != 1 || info.FeeHash != feeHash || len(txs[0].TxIn[0].SignatureScript) == 0 {
+				t.Fatalf("retained signed fee did not survive reopen: %+v %v", info, err)
+			}
+			wantState := uint32(udb.VSPFeeProcessPaid)
+			if scenario == "confirmed payment" {
+				wantState = uint32(udb.VSPFeeProcessConfirmed)
+			}
+			if info.FeeTxStatus != wantState {
+				t.Fatalf("quote refresh changed durable fee status: %d", info.FeeTxStatus)
 			}
 			if info.Host != c.url || !bytes.Equal(info.PubKey, c.pub) {
 				t.Fatal("recovery changed the provider identity")

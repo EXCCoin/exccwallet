@@ -26,7 +26,7 @@ func TestClientRemovalCancelsOnlyItsJobs(t *testing.T) {
 	}
 	called := false
 	a.schedule("unexpected retry", func() error { called = true; return nil })
-	a.task("unexpected running task", func() error { called = true; return nil })()
+	a.testTask("unexpected running task", func() error { called = true; return nil })()
 	if a.timer != nil || called {
 		t.Fatal("pruned ticket resumed work")
 	}

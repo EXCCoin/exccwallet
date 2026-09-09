@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
+	"github.com/EXCCoin/exccd/txscript/v4"
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 	"github.com/EXCCoin/exccd/wire"
 	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
+	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
 )
 
 type gatedFeeAddress struct {
@@ -56,7 +58,7 @@ func TestConcurrentFeeTasksRecordOnePayment(t *testing.T) {
 	results := make(chan error, 2)
 	run := func(i int) {
 		var result error
-		fp.task("create fee", func() error {
+		fp.testTask("create fee", func() error {
 			result = fp.makeFeeTx(payments[i])
 			return result
 		})()
@@ -123,6 +125,8 @@ func TestProcessWaitingForFeeTaskCanBeCancelled(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer finish()
+			priorError := errors.New("active operation failure")
+			fp.err = priorError
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			done := make(chan error, 1)
@@ -146,6 +150,9 @@ func TestProcessWaitingForFeeTaskCanBeCancelled(t *testing.T) {
 				}
 			case <-time.After(time.Second):
 				t.Fatal("cancellation waited for the fee operation")
+			}
+			if fp.err != priorError {
+				t.Fatal("cancelled waiter changed the active operation diagnostic")
 			}
 		})
 	}
@@ -266,5 +273,95 @@ func TestPaymentResponseMismatchDoesNotIncludeSecrets(t *testing.T) {
 		feeTx: feeTx, votingKey: votingKey, votingAddr: voting, commitmentAddr: commitment}
 	if err := fp.submitPayment(); err == nil || err.Error() != "server response contains differing request" {
 		t.Fatalf("payment mismatch did not return a constant error: %v", err)
+	}
+}
+
+func TestFeeTaskClearsPreviousErrorDuringRetry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	previous := errors.New("context deadline exceeded")
+	fp := &feePayment{ctx: ctx, err: previous}
+	fp.testTask("confirm payment", func() error {
+		fp.mu.Lock()
+		defer fp.mu.Unlock()
+		if fp.err != nil {
+			t.Error("active retry still exposes the previous failure")
+		}
+		return previous
+	})()
+	fp.mu.Lock()
+	defer fp.mu.Unlock()
+	if !errors.Is(fp.err, previous) {
+		t.Fatal("retry did not expose its new failure")
+	}
+}
+
+func TestProcessPublishesForegroundFailureAndClearsItDuringRetry(t *testing.T) {
+	w, _, template := feeTestWallet(t)
+	ctx := context.Background()
+	address, err := w.NewExternalAddress(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := feeTopUpFunding(t, w, address, 100, 150)
+	ticket := template.Copy()
+	ticket.TxIn[0].PreviousOutPoint.Hash = parent.TxHash()
+	sigErrors, err := w.SignTransaction(ctx, ticket, txscript.SigHashAll, nil, nil, nil)
+	if err != nil || len(sigErrors) != 0 {
+		t.Fatalf("sign ticket: %v %v", err, sigErrors)
+	}
+	if err := w.AddTransaction(ctx, ticket, nil); err != nil {
+		t.Fatal(err)
+	}
+	c := testFeeClient(w)
+	defer c.Close()
+	hash := ticket.TxHash()
+	fp := c.feePayment(&hash, Policy{}, false)
+	if fp == nil {
+		t.Fatal("missing payment worker")
+	}
+	fp.schedule("", nil)
+	fp.mu.Lock()
+	fp.err = errors.New("previous operation failed")
+	fp.mu.Unlock()
+	fp.timerMu.Lock()
+	fp.phase = "reconcile payment"
+	fp.nextRetry = time.Now().Add(time.Minute)
+	fp.timerMu.Unlock()
+	requests := 0
+	c.Transport = vspTestTransport(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if req.URL.Path != "/api/v3/feeaddress" {
+			t.Errorf("unexpected request: %s", req.URL.Path)
+		}
+		tracked := c.TrackedTickets()
+		if len(tracked) != 1 || tracked[0].LastError != "" {
+			t.Error("foreground retry still exposes its previous failure")
+		}
+		return nil, context.DeadlineExceeded
+	})
+	err = c.ProcessWithPolicy(ctx, &hash, wire.NewMsgTx(), Policy{})
+	if !errors.Is(err, context.DeadlineExceeded) || requests != 1 {
+		t.Fatalf("foreground request did not reach injected timeout: %v (%d calls)", err, requests)
+	}
+	info, readErr := w.VSPTicketInfo(ctx, &hash)
+	if readErr != nil || info.FeeTxStatus != uint32(udb.VSPFeeProcessErrored) {
+		t.Fatalf("foreground failure was not persisted: %+v %v", info, readErr)
+	}
+	tracked := c.TrackedTickets()
+	if len(tracked) != 1 || tracked[0].LastError != err.Error() || tracked[0].NextRetry.IsZero() {
+		t.Fatalf("scheduled job lost its foreground failure diagnostic: %+v", tracked)
+	}
+	nextError := errors.New("background attempt failed")
+	fp.testTask("reconcile payment", func() error {
+		tracked := c.TrackedTickets()
+		if len(tracked) != 1 || tracked[0].LastError != "" || !tracked[0].NextRetry.IsZero() {
+			t.Error("background retry retained the completed foreground failure")
+		}
+		return nextError
+	})()
+	tracked = c.TrackedTickets()
+	if len(tracked) != 1 || tracked[0].LastError != nextError.Error() {
+		t.Fatal("completed foreground operation overwrote the background result")
 	}
 }

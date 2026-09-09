@@ -24,6 +24,7 @@ import (
 	"github.com/EXCCoin/exccwallet/v2/wallet"
 	"github.com/EXCCoin/exccwallet/v2/wallet/txrules"
 	"github.com/EXCCoin/exccwallet/v2/wallet/txsizes"
+	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
 )
 
 var prng lockedRand
@@ -101,10 +102,11 @@ type feePayment struct {
 	err           error
 	blocked       bool
 
-	timerMu   sync.Mutex
-	timer     *time.Timer
-	phase     string
-	nextRetry time.Time
+	timerMu         sync.Mutex
+	timer           *time.Timer
+	timerGeneration uint64
+	phase           string
+	nextRetry       time.Time
 }
 
 type state uint32
@@ -251,7 +253,18 @@ func (c *Client) feePaymentWithTx(ticketHash *chainhash.Hash, policy Policy, pai
 		if fp == nil {
 			return
 		}
-		var schedule bool
+		finish, err := fp.beginOperation(fp.ctx)
+		if err != nil {
+			fp.stop()
+			fp = nil
+			return
+		}
+		defer finish()
+		if fp.blocked || paidConfirmed {
+			fp.schedule("confirm payment", fp.confirmPayment)
+		} else {
+			fp.schedule("reconcile payment", fp.reconcilePayment)
+		}
 		c.mu.Lock()
 		if c.closed || fp.ctx.Err() != nil || c.jobGeneration[*ticketHash] != generation {
 			c.mu.Unlock()
@@ -265,16 +278,8 @@ func (c *Client) feePaymentWithTx(ticketHash *chainhash.Hash, policy Policy, pai
 			fp = fp2
 		} else {
 			c.jobs[*ticketHash] = fp
-			schedule = true
 		}
 		c.mu.Unlock()
-		if schedule {
-			if fp.blocked {
-				fp.schedule("confirm payment", fp.confirmPayment)
-			} else {
-				fp.schedule("reconcile payment", fp.reconcilePayment)
-			}
-		}
 	}()
 
 	parent := c.ctx
@@ -377,6 +382,7 @@ func (fp *feePayment) schedule(name string, method func() error) {
 
 	fp.timerMu.Lock()
 	defer fp.timerMu.Unlock()
+	fp.timerGeneration++
 	if fp.timer != nil {
 		fp.timer.Stop()
 		fp.timer = nil
@@ -388,7 +394,7 @@ func (fp *feePayment) schedule(name string, method func() error) {
 		fp.phase = name
 		fp.nextRetry = time.Now().Add(delay)
 		log.Debugf("scheduling %q for ticket %s in %v", name, &fp.ticketHash, delay)
-		fp.timer = time.AfterFunc(delay, fp.task(name, method))
+		fp.timer = time.AfterFunc(delay, fp.task(name, method, fp.timerGeneration))
 	} else {
 		fp.phase = ""
 		fp.nextRetry = time.Time{}
@@ -458,7 +464,7 @@ func (fp *feePayment) beginOperation(ctx context.Context) (func(), error) {
 // task returns a function running a feePayment method.
 // If the method errors, the error is logged, and the payment is put
 // in an errored state and may require manual processing.
-func (fp *feePayment) task(name string, method func() error) func() {
+func (fp *feePayment) task(name string, method func() error, generation uint64) func() {
 	return func() {
 		finish, err := fp.beginOperation(fp.ctx)
 		if err != nil {
@@ -466,8 +472,15 @@ func (fp *feePayment) task(name string, method func() error) func() {
 		}
 		defer finish()
 		fp.timerMu.Lock()
+		if generation != fp.timerGeneration {
+			fp.timerMu.Unlock()
+			return
+		}
 		fp.nextRetry = time.Time{}
 		fp.timerMu.Unlock()
+		fp.mu.Lock()
+		fp.err = nil
+		fp.mu.Unlock()
 		err = method()
 		fp.mu.Lock()
 		fp.err = err
@@ -937,38 +950,21 @@ func (fp *feePayment) reconcilePayment() error {
 	if errors.As(err, &apiErr) {
 		switch apiErr.Code {
 		case codeFeeAlreadyReceived:
-			err = w.SetPublished(ctx, &feeHash, true)
-			if err != nil {
-				return err
-			}
-			err = w.UpdateVspTicketFeeToPaid(ctx, &fp.ticketHash, &feeHash, fp.client.url, fp.client.pub)
-			if err != nil {
-				return err
-			}
+			// The provider may still be waiting to broadcast this payment.
+			// Only a matching broadcast status makes its change spendable.
 			err = nil
-		case codeInvalidFeeTx, codeCannotBroadcastFee:
-			err := w.ResetVSPTicketFee(ctx, &fp.ticketHash, &feeHash, fp.client.url, fp.client.pub)
-			if err != nil {
-				return err
-			}
-			// Attempt to create a new fee transaction
-			fp.mu.Lock()
-			fp.feeHash = chainhash.Hash{}
-			fp.feeTx = nil
-			fp.fee = 0
-			fp.feeAddr = nil
-			fp.mu.Unlock()
-			// err not nilled, so reconcile payment is rescheduled.
 		}
 	}
 	if err != nil {
-		// Nothing left to try except trying again.
+		// A provider error does not prove that an earlier submission was
+		// never broadcast. Keep the exact payment and its spent inputs.
 		fp.schedule("reconcile payment", fp.reconcilePayment)
 		return err
 	}
 
 	err = w.UpdateVspTicketFeeToPaid(ctx, &fp.ticketHash, &feeHash, fp.client.url, fp.client.pub)
 	if err != nil {
+		fp.schedule("confirm payment", fp.confirmPayment)
 		return err
 	}
 
@@ -1054,24 +1050,22 @@ func (fp *feePayment) submitPayment() (err error) {
 	if err != nil {
 		return err
 	}
-	err = fp.client.post(ctx, "/api/v3/payfee", fp.commitmentAddr,
-		&payfeeResponse, json.RawMessage(requestBody))
-	if err != nil {
-		var apiErr *BadRequestError
-		if errors.As(err, &apiErr) && apiErr.Code == codeFeeExpired {
-			feeHash := feeTx.TxHash()
-			if resetErr := w.ResetVSPTicketFee(ctx, &fp.ticketHash, &feeHash, fp.client.url, fp.client.pub); resetErr != nil {
-				return fmt.Errorf("payfee: %w; could not reset expired fee: %w", err, resetErr)
-			}
-			fp.mu.Lock()
-			fp.feeTx = nil
-			fp.feeHash = chainhash.Hash{}
-			fp.fee = 0
-			fp.feeAddr = nil
-			fp.mu.Unlock()
-			fp.schedule("reconcile payment", fp.reconcilePayment)
+	for attempt := 0; ; attempt++ {
+		err = fp.client.post(ctx, "/api/v3/payfee", fp.commitmentAddr,
+			&payfeeResponse, json.RawMessage(requestBody))
+		if err == nil {
+			break
 		}
-		return fmt.Errorf("payfee: %w", err)
+		var apiErr *BadRequestError
+		if attempt != 0 || !errors.As(err, &apiErr) || apiErr.Code != codeFeeExpired {
+			return fmt.Errorf("payfee: %w", err)
+		}
+		if refreshErr := fp.refreshExpiredFeeQuote(feeTx); refreshErr != nil {
+			if errors.As(refreshErr, &apiErr) && apiErr.Code == codeFeeAlreadyReceived {
+				return fmt.Errorf("payfee: %w", refreshErr)
+			}
+			return fmt.Errorf("payfee: %w; could not refresh expired quote: %w", err, refreshErr)
+		}
 	}
 
 	// Check for matching original request.
@@ -1084,6 +1078,44 @@ func (fp *feePayment) submitPayment() (err error) {
 
 	log.Infof("successfully processed %v", fp.ticketHash)
 	return nil
+}
+
+func (fp *feePayment) refreshExpiredFeeQuote(feeTx *wire.MsgTx) error {
+	feeHash := feeTx.TxHash()
+	w := fp.client.Wallet
+	info, err := w.VSPTicketInfo(fp.ctx, &fp.ticketHash)
+	if err != nil {
+		return err
+	}
+	if info.FeeHash != feeHash || info.FeeTxStatus == uint32(udb.VSPFeeProcessConfirmed) {
+		return fmt.Errorf("saved VSP payment changed or is already confirmed; payment was retained")
+	}
+	_, height, err := w.TxBlock(fp.ctx, &feeHash)
+	if err != nil {
+		return err
+	}
+	if height != -1 {
+		return fmt.Errorf("saved VSP fee is already mined; payment was retained")
+	}
+	if err := fp.receiveFeeAddress(); err != nil {
+		return err
+	}
+	fp.mu.Lock()
+	fee, address := fp.fee, fp.feeAddr
+	fp.mu.Unlock()
+	if fee <= 0 {
+		return fmt.Errorf("server fee amount is invalid; payment was retained")
+	}
+	version, script := address.PaymentScript()
+	for _, output := range feeTx.TxOut {
+		if output.Version == version && bytes.Equal(output.PkScript, script) {
+			if output.Value >= int64(fee) {
+				return nil
+			}
+			break
+		}
+	}
+	return fmt.Errorf("updated VSP quote is not covered by the saved payment; payment was retained for review")
 }
 
 func (fp *feePayment) confirmPayment() (err error) {
@@ -1112,13 +1144,27 @@ func (fp *feePayment) confirmPayment() (err error) {
 		fp.schedule("confirm payment", fp.confirmPayment)
 		return nil
 	case "broadcast":
-		log.Infof("VSP has successfully sent the fee tx for %v", &fp.ticketHash)
-		// Broadcasted, but not confirmed.
+		// Retain confirmation polling even if validation or storage fails.
 		fp.schedule("confirm payment", fp.confirmPayment)
+		fp.mu.Lock()
+		feeHash, feeTx, blocked := fp.feeHash, fp.feeTx, fp.blocked
+		fp.mu.Unlock()
+		if blocked || feeTx == nil {
+			return errMissingFee
+		}
+		providerHash, err := chainhash.NewHashFromStr(status.FeeTxHash)
+		if err != nil || status.FeeTxHash == "" || feeHash == (chainhash.Hash{}) ||
+			*providerHash != feeHash || feeTx.TxHash() != feeHash {
+			return fmt.Errorf("VSP broadcast status does not match the saved fee transaction")
+		}
+		if err := fp.client.Wallet.SetPublished(ctx, &feeHash, true); err != nil {
+			return err
+		}
+		log.Infof("VSP has successfully sent the fee tx for %v", &fp.ticketHash)
 		return nil
 	case "confirmed":
 		return fp.recordConfirmedFee()
-	case "error":
+	case "none", "error":
 		fp.mu.Lock()
 		blocked := fp.blocked
 		fp.mu.Unlock()
@@ -1126,8 +1172,8 @@ func (fp *feePayment) confirmPayment() (err error) {
 			fp.schedule("confirm payment", fp.confirmPayment)
 			return errMissingFee
 		}
-		log.Warnf("VSP failed to broadcast feetx for %v -- restarting payment",
-			&fp.ticketHash)
+		log.Warnf("VSP reports fee status %q for %v -- reconciling payment",
+			status.FeeTxStatus, &fp.ticketHash)
 		fp.schedule("reconcile payment", fp.reconcilePayment)
 		return nil
 	default:

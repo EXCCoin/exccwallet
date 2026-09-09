@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -276,5 +277,277 @@ func TestVSPClientPrivateHTTPSCustomDialer(t *testing.T) {
 	fee, err := c.FeePercentage(context.Background())
 	if err != nil || fee != 1 || !dialed.Load() {
 		t.Fatalf("private HTTPS/custom dialer failed: fee=%v, dialed=%v, err=%v", fee, dialed.Load(), err)
+	}
+}
+
+func TestVSPClientBoundsAllTicketRequests(t *testing.T) {
+	pub, key := vspTestKeys()
+	c := newClient("https://vsp.example", pub, vspTestSigner{})
+	const count = 400
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	started := make(chan struct{}, count)
+	release := make(chan struct{})
+	var active, peak atomic.Int32
+	c.Transport = vspTestTransport(func(req *http.Request) (*http.Response, error) {
+		current := active.Add(1)
+		defer active.Add(-1)
+		for old := peak.Load(); current > old; old = peak.Load() {
+			if peak.CompareAndSwap(old, current) {
+				break
+			}
+		}
+		started <- struct{}{}
+		select {
+		case <-release:
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+		body := []byte("{}")
+		return &http.Response{StatusCode: http.StatusOK,
+			Header: http.Header{"Vsp-Server-Signature": []string{base64.StdEncoding.EncodeToString(ed25519.Sign(key, body))}},
+			Body:   io.NopCloser(bytes.NewReader(body))}, nil
+	})
+	done := make(chan error, count)
+	for i := range count {
+		go func() {
+			if i%2 == 0 {
+				done <- c.get(ctx, "/api/v3/vspinfo", nil)
+			} else {
+				done <- c.post(ctx, "/api/v3/ticketstatus", nil, nil, struct{}{})
+			}
+		}()
+	}
+	for range maxConcurrentManagedTickets {
+		select {
+		case <-started:
+		case <-ctx.Done():
+			t.Fatal("requests did not start")
+		}
+	}
+	select {
+	case <-started:
+	case <-time.After(100 * time.Millisecond):
+	}
+	beforeRelease := peak.Load()
+	close(release)
+	for range count {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if beforeRelease > maxConcurrentManagedTickets || peak.Load() > maxConcurrentManagedTickets {
+		t.Fatalf("provider received %d concurrent requests, limit %d", peak.Load(), maxConcurrentManagedTickets)
+	}
+	if active.Load() != 0 {
+		t.Fatal("request remained active after completion")
+	}
+}
+
+func TestVSPClientQueuedRequestsRespectCancellationAndDeadline(t *testing.T) {
+	pub, key := vspTestKeys()
+	c := newClient("https://vsp.example", pub, vspTestSigner{})
+	for range maxConcurrentManagedTickets {
+		c.requests <- struct{}{}
+	}
+	var calls atomic.Int32
+	c.Transport = vspTestTransport(func(req *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		deadline, ok := req.Context().Deadline()
+		if !ok || time.Until(deadline) < vspRequestTimeout-100*time.Millisecond {
+			t.Error("queue wait consumed the request timeout")
+		}
+		body := []byte("{}")
+		return &http.Response{StatusCode: http.StatusOK,
+			Header: http.Header{"Vsp-Server-Signature": []string{base64.StdEncoding.EncodeToString(ed25519.Sign(key, body))}},
+			Body:   io.NopCloser(bytes.NewReader(body))}, nil
+	})
+	for _, cancelled := range []bool{false, true} {
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+		if cancelled {
+			cancel()
+		}
+		err := c.get(ctx, "/api/v3/vspinfo", nil)
+		cancel()
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("queued request lost cancellation: %v", err)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("cancelled queued request contacted the provider")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- c.get(ctx, "/api/v3/vspinfo", nil) }()
+	select {
+	case err := <-done:
+		t.Fatalf("queued request ended early: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	<-c.requests
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatal("queued request did not complete exactly once")
+	}
+	if len(c.requests) != maxConcurrentManagedTickets-1 {
+		t.Fatal("request leaked a slot")
+	}
+}
+
+type vspSilentConn struct {
+	net.Conn
+	silent atomic.Bool
+}
+
+func (c *vspSilentConn) Write(p []byte) (int, error) {
+	if c.silent.Load() {
+		return len(p), nil
+	}
+	return c.Conn.Write(p)
+}
+
+type vspSilentListener struct {
+	net.Listener
+	accepted atomic.Int32
+}
+
+func (l *vspSilentListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	l.accepted.Add(1)
+	return &vspSilentConn{Conn: c}, nil
+}
+
+func TestVSPClientIsolatesSilentHTTPConnection(t *testing.T) {
+	pub, key := vspTestKeys()
+	type connKey struct{}
+	stalled, disconnected := make(chan struct{}), make(chan struct{})
+	started := make(chan struct{}, 32)
+	release := make(chan struct{})
+	var released atomic.Bool
+	defer func() {
+		if released.CompareAndSwap(false, true) {
+			close(release)
+		}
+	}()
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor != 1 || r.TLS.NegotiatedProtocol == "h2" {
+			t.Error("VSP request did not use HTTP/1.1")
+		}
+		if r.URL.Path == "/stall" {
+			r.Context().Value(connKey{}).(*vspSilentConn).silent.Store(true)
+			writeVSPTestResponse(w, key, http.StatusOK, []byte(`{"feepercentage":1}`))
+			w.(http.Flusher).Flush()
+			close(stalled)
+			<-r.Context().Done()
+			close(disconnected)
+			return
+		}
+		if r.URL.Path == "/hold" {
+			started <- struct{}{}
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		writeVSPTestResponse(w, key, http.StatusOK, []byte(`{"feepercentage":1}`))
+	}))
+	listener := &vspSilentListener{Listener: server.Listener}
+	server.Listener = listener
+	server.EnableHTTP2 = true
+	server.Config.ConnContext = func(ctx context.Context, conn net.Conn) context.Context {
+		return context.WithValue(ctx, connKey{}, conn.(*tls.Conn).NetConn().(*vspSilentConn))
+	}
+	server.StartTLS()
+	defer server.Close()
+	c, err := New(Config{URL: server.URL,
+		PubKey: base64.StdEncoding.EncodeToString(pub), Wallet: &wallet.Wallet{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	transport := c.Transport.(*http.Transport)
+	transport.TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	transport.ForceAttemptHTTP2 = true
+	c.sign = (vspTestSigner{}).SignMessage
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := c.FeePercentage(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stallCtx, stopStall := context.WithCancel(ctx)
+	defer stopStall()
+	stallDone := make(chan error, 1)
+	go func() { stallDone <- c.get(stallCtx, "/stall", nil) }()
+	select {
+	case <-stalled:
+	case <-ctx.Done():
+		t.Fatal("request did not stall")
+	}
+	const count = 2 * (maxConcurrentManagedTickets - 1)
+	done := make(chan error, count)
+	for i := range count {
+		go func() {
+			if i%2 == 0 {
+				done <- c.get(ctx, "/hold", nil)
+			} else {
+				done <- c.post(ctx, "/hold", nil, nil, struct{}{})
+			}
+		}()
+	}
+	for range maxConcurrentManagedTickets - 1 {
+		select {
+		case <-started:
+		case <-ctx.Done():
+			t.Fatal("other requests blocked behind silent connection")
+		}
+	}
+	if got := listener.accepted.Load(); got != maxConcurrentManagedTickets {
+		t.Fatalf("unexpected connection count: %d", got)
+	}
+	if released.CompareAndSwap(false, true) {
+		close(release)
+	}
+	for range count {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal("healthy requests did not complete")
+		}
+	}
+	select {
+	case err := <-stallDone:
+		t.Fatalf("silent request ended before cancellation: %v", err)
+	default:
+	}
+	stopStall()
+	select {
+	case err := <-stallDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("silent request lost cancellation: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("silent request did not cancel")
+	}
+	select {
+	case <-disconnected:
+	case <-ctx.Done():
+		t.Fatal("cancelled connection remained open")
+	}
+	fee, err := c.FeePercentage(ctx)
+	if err != nil || fee != 1 {
+		t.Fatalf("request after cancellation: fee=%v err=%v", fee, err)
+	}
+	if got := listener.accepted.Load(); got != maxConcurrentManagedTickets {
+		t.Fatalf("healthy connections were not reused: %d", got)
 	}
 }

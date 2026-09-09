@@ -51,44 +51,6 @@ func (w *Wallet) RecordVSPFee(ctx context.Context, ticketHash *chainhash.Hash,
 	return recorded, err
 }
 
-// ResetVSPTicketFee clears a payment explicitly rejected by its provider.
-// Ordinary processing errors retain the saved payment and provider identity.
-func (w *Wallet) ResetVSPTicketFee(ctx context.Context, ticketHash, feeHash *chainhash.Hash,
-	host string, pubkey []byte) error {
-
-	err := walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
-		saved, err := udb.GetVSPTicket(dbtx, *ticketHash)
-		if err != nil {
-			return err
-		}
-		if saved == nil || saved.FeeHash != *feeHash ||
-			!sameVSPProvider(saved.Host, host, saved.PubKey, pubkey) ||
-			saved.FeeTxStatus == uint32(udb.VSPFeeProcessConfirmed) {
-			return errors.E(errors.Invalid, "saved VSP payment changed or is already confirmed")
-		}
-		ns := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
-		details, err := w.txStore.TxDetails(ns, feeHash)
-		if err != nil {
-			return err
-		}
-		if details == nil || details.Block.Height != -1 {
-			return errors.E(errors.Invalid, "VSP fee is missing or already mined")
-		}
-		if err := w.txStore.RemoveUnconfirmed(ns, &details.MsgTx, feeHash); err != nil {
-			return err
-		}
-		return w.setVSPTicket(dbtx, ticketHash, &udb.VSPTicket{
-			FeeTxStatus: uint32(udb.VSPFeeProcessErrored),
-			Host:        host,
-			PubKey:      pubkey,
-		})
-	})
-	if err == nil {
-		w.NtfnServer.notifyRemovedTransaction(*feeHash)
-	}
-	return err
-}
-
 func sameVSPProvider(firstHost, secondHost string, firstKey, secondKey []byte) bool {
 	if !bytes.Equal(firstKey, secondKey) {
 		return false
