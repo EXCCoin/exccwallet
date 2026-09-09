@@ -9,13 +9,14 @@ import (
 	"math/big"
 	"sort"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 	blockchain "github.com/EXCCoin/exccd/blockchain/standalone/v2"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/chaincfg/v3"
 	"github.com/EXCCoin/exccd/gcs/v3"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 )
 
 // SidechainForest provides in-memory management of sidechain and orphan blocks.
@@ -96,6 +97,23 @@ func (t *sidechainRootedTree) duplicateNode(n *BlockNode) bool {
 	// mainchain.
 	if ok && n.FilterV2 != nil && old.FilterV2 == nil {
 		old.FilterV2 = n.FilterV2
+	}
+
+	// A later notification may know transactions which were unavailable when
+	// the header was added.  Retain both sets, and process parents before
+	// children so their credits exist when the children are recorded.
+	if ok && n.RelevantTxs != nil {
+		records := make(map[chainhash.Hash]*udb.TxRecord)
+		for _, txs := range [][]*wire.MsgTx{old.RelevantTxs, n.RelevantTxs} {
+			for _, tx := range txs {
+				hash := tx.TxHash()
+				records[hash] = &udb.TxRecord{Hash: hash, MsgTx: *tx}
+			}
+		}
+		old.RelevantTxs = make([]*wire.MsgTx, 0, len(records))
+		for _, rec := range udb.DependencySort(records) {
+			old.RelevantTxs = append(old.RelevantTxs, &rec.MsgTx)
+		}
 	}
 
 	return ok

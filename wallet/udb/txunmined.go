@@ -8,12 +8,12 @@ package udb
 import (
 	"bytes"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 	"github.com/EXCCoin/exccd/blockchain/stake/v4"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/dcrutil/v4"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 )
 
 // InsertMemPoolTx inserts a memory pool transaction record.  It also marks
@@ -289,7 +289,7 @@ func (s *Store) UnminedTxs(dbtx walletdb.ReadTx) ([]*TxRecord, error) {
 		return nil, err
 	}
 
-	recs := dependencySort(recSet)
+	recs := DependencySort(recSet)
 	return recs, nil
 }
 
@@ -337,10 +337,10 @@ func (s *Store) unminedTxHashes(ns walletdb.ReadBucket) ([]*chainhash.Hash, erro
 // PruneUnmined removes unmined transactions that no longer belong in the
 // unmined tx set.  This includes:
 //
-//   * Any transactions past a set expiry
-//   * Ticket purchases with a different ticket price than the passed stake
+//   - Any transactions past a set expiry
+//   - Ticket purchases with a different ticket price than the passed stake
 //     difficulty requirement of the next block (when sdiff is non-zero)
-//   * Votes that do not vote on the tip block
+//   - Votes that do not vote on the tip block
 func (s *Store) PruneUnmined(dbtx walletdb.ReadWriteTx, sdiff dcrutil.Amount) ([]*chainhash.Hash, error) {
 	ns := dbtx.ReadWriteBucket(wtxmgrBucketKey)
 

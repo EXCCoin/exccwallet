@@ -14,13 +14,13 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/EXCCoin/exccd/blockchain/stake/v4"
+	"github.com/EXCCoin/exccd/chaincfg/chainhash"
+	"github.com/EXCCoin/exccd/wire"
 	"github.com/EXCCoin/exccwallet/v2/errors"
 	"github.com/EXCCoin/exccwallet/v2/rpc/client/dcrd"
 	"github.com/EXCCoin/exccwallet/v2/validate"
 	"github.com/EXCCoin/exccwallet/v2/wallet"
-	"github.com/EXCCoin/exccd/blockchain/stake/v4"
-	"github.com/EXCCoin/exccd/chaincfg/chainhash"
-	"github.com/EXCCoin/exccd/wire"
 	"github.com/jrick/wsrpc/v2"
 	"golang.org/x/sync/errgroup"
 )
@@ -329,6 +329,14 @@ func (s *Syncer) Run(ctx context.Context) (err error) {
 	}
 	s.fetchMissingCfiltersFinished()
 
+	// Block notifications contain no relevant transactions until a filter is
+	// loaded.  Install the known wallet data before subscribing so an empty
+	// startup notification cannot advance the transaction marker past a gap.
+	err = s.wallet.LoadActiveDataFilters(ctx, s.rpc, true)
+	if err != nil {
+		return err
+	}
+
 	// Request notifications for connected and disconnected blocks.
 	err = s.rpc.Call(ctx, "notifyblocks", nil)
 	if err != nil {
@@ -475,51 +483,10 @@ func (s *Syncer) Run(ctx context.Context) (err error) {
 	}
 	s.fetchHeadersFinished()
 
-	rescanPoint, err = s.wallet.RescanPoint(ctx)
+	err = s.finishStartupSync(ctx)
 	if err != nil {
 		return err
 	}
-	if rescanPoint != nil {
-		s.mu.Lock()
-		discoverAccts := s.discoverAccts
-		s.mu.Unlock()
-		s.discoverAddressesStart()
-		err = s.wallet.DiscoverActiveAddresses(ctx, s.rpc, rescanPoint, discoverAccts, s.wallet.GapLimit())
-		if err != nil {
-			return err
-		}
-		s.discoverAddressesFinished()
-		s.mu.Lock()
-		s.discoverAccts = false
-		s.mu.Unlock()
-		err = s.wallet.LoadActiveDataFilters(ctx, s.rpc, true)
-		if err != nil {
-			return err
-		}
-
-		s.rescanStart()
-		rescanBlock, err := s.wallet.BlockHeader(ctx, rescanPoint)
-		if err != nil {
-			return err
-		}
-		progress := make(chan wallet.RescanProgress, 1)
-		go s.wallet.RescanProgressFromHeight(ctx, s.rpc, int32(rescanBlock.Height), progress)
-
-		for p := range progress {
-			if p.Err != nil {
-				return p.Err
-			}
-			s.rescanProgress(p.ScannedThrough)
-		}
-		s.rescanFinished()
-
-	} else {
-		err = s.wallet.LoadActiveDataFilters(ctx, s.rpc, true)
-		if err != nil {
-			return err
-		}
-	}
-	s.synced()
 
 	// Rebroadcast unmined transactions
 	err = s.wallet.PublishUnminedTransactions(ctx, s.rpc)
@@ -553,6 +520,68 @@ func (s *Syncer) Run(ctx context.Context) (err error) {
 	case <-client.Done():
 		return client.Err()
 	}
+}
+
+// finishStartupSync serializes the final catch-up and ready notification with
+// live chain changes.
+func (s *Syncer) finishStartupSync(ctx context.Context) error {
+	s.sidechainsMu.Lock()
+	defer s.sidechainsMu.Unlock()
+	rescanPoint, err := s.wallet.RescanPoint(ctx)
+	if err != nil {
+		return err
+	}
+	if rescanPoint != nil {
+		s.mu.Lock()
+		discoverAccts := s.discoverAccts
+		s.mu.Unlock()
+		s.discoverAddressesStart()
+		err = s.wallet.DiscoverActiveAddresses(ctx, s.rpc, rescanPoint, discoverAccts, s.wallet.GapLimit())
+		if err != nil {
+			return err
+		}
+		s.discoverAddressesFinished()
+		s.mu.Lock()
+		s.discoverAccts = false
+		s.mu.Unlock()
+		err = s.wallet.LoadActiveDataFilters(ctx, s.rpc, true)
+		if err != nil {
+			return err
+		}
+
+		err = s.rescan(ctx, rescanPoint)
+		if err != nil {
+			return err
+		}
+
+	} else {
+		err = s.wallet.LoadActiveDataFilters(ctx, s.rpc, true)
+		if err != nil {
+			return err
+		}
+	}
+	s.synced()
+	return nil
+}
+
+// rescan catches up the recorded main chain while sidechainsMu prevents another
+// chain switch from changing the range before its transactions are processed.
+func (s *Syncer) rescan(ctx context.Context, point *chainhash.Hash) error {
+	s.rescanStart()
+	header, err := s.wallet.BlockHeader(ctx, point)
+	if err != nil {
+		return err
+	}
+	progress := make(chan wallet.RescanProgress, 1)
+	go s.wallet.RescanProgressFromHeight(ctx, s.rpc, int32(header.Height), progress)
+	for p := range progress {
+		if p.Err != nil {
+			return p.Err
+		}
+		s.rescanProgress(p.ScannedThrough)
+	}
+	s.rescanFinished()
+	return nil
 }
 
 type notifier struct {
@@ -654,6 +683,28 @@ func (s *Syncer) blockConnected(ctx context.Context, params json.RawMessage) err
 		return err
 	}
 	if len(bestChain) != 0 {
+		// A sidechain assembled from headers can contain blocks whose wallet
+		// transactions have not been fetched.  Stop reporting readiness before
+		// ChainSwitch announces the new tip and starts transaction consumers.
+		wasSynced := atomic.LoadUint32(&s.atomicWalletSynced) != 0
+		if wasSynced {
+			// This notification may have waited for startup to finish while
+			// acquiring sidechainsMu.  Its failure must now restart sync.
+			s.notifier.connectingBlocks = true
+			point, err := s.wallet.RescanPoint(ctx)
+			if err != nil {
+				return err
+			}
+			if point != nil {
+				s.unsynced()
+			}
+			for _, node := range bestChain {
+				if node.RelevantTxs == nil {
+					s.unsynced()
+					break
+				}
+			}
+		}
 		var prevChain []*wallet.BlockNode
 		prevChain, err = s.wallet.ChainSwitch(ctx, &s.sidechains, bestChain)
 		if err != nil {
@@ -670,6 +721,22 @@ func (s *Syncer) blockConnected(ctx context.Context, params json.RawMessage) err
 		for _, n := range bestChain {
 			log.Infof("Connected block %v, height %d, %d wallet transaction(s)",
 				n.Hash, n.Header.Height, len(n.RelevantTxs))
+		}
+		if wasSynced {
+			point, err := s.wallet.RescanPoint(ctx)
+			if err != nil {
+				return err
+			}
+			if point != nil {
+				s.unsynced()
+				if err := s.wallet.LoadActiveDataFilters(ctx, s.rpc, true); err != nil {
+					return err
+				}
+				if err := s.rescan(ctx, point); err != nil {
+					return err
+				}
+			}
+			s.synced()
 		}
 	} else {
 		log.Infof("Observed sidechain or orphan block %v (height %d)", &blockHash, header.Height)

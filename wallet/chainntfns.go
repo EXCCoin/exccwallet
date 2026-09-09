@@ -119,6 +119,19 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest,
 		}
 
 		if sideChainForkHeight <= tipHeight {
+			// Only blocks through the processed marker are known to have been
+			// fully scanned. Rollback's stored transactions cannot establish
+			// completeness for any later header-only block or scan gap.
+			processed := w.txStore.ProcessedTxsBlockMarker(dbtx)
+			processed, err := w.mainChainAncestor(dbtx, processed)
+			if err != nil {
+				return err
+			}
+			processedHeader, err := w.txStore.GetBlockHeader(dbtx, processed)
+			if err != nil {
+				return err
+			}
+
 			chainTipChanges.DetachedBlocks = make([]*chainhash.Hash, tipHeight-sideChainForkHeight+1)
 			prevChain = make([]*BlockNode, tipHeight-sideChainForkHeight+1)
 			for i := tipHeight; i >= sideChainForkHeight; i-- {
@@ -158,6 +171,11 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest,
 				return err
 			}
 			for _, n := range prevChain {
+				if n.Header.Height > processedHeader.Height {
+					// Preserve unknown completeness so reattaching this block
+					// cannot advance the marker across an existing scan gap.
+					continue
+				}
 				n.RelevantTxs = removedTxs[*n.Hash]
 				if n.RelevantTxs == nil {
 					n.RelevantTxs = []*wire.MsgTx{}
@@ -190,22 +208,23 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest,
 		}
 		if marker != nil {
 			// To avoid skipped blocks, the marker is not advanced if there is a
-			// gap between the existing rescan point (main chain fork point of
-			// the current marker) and the first block attached in this chain
-			// switch.
+			// gap between the first unprocessed block and the first block
+			// attached in this chain switch.
 			r, err := w.rescanPoint(dbtx)
 			if err != nil {
 				return err
 			}
-			rHeader, err := w.txStore.GetBlockHeader(dbtx, r)
-			if err != nil {
-				return err
-			}
-			if !(rHeader.Height+1 < chain[0].Header.Height) {
-				log.Debugf("Updating processed txs block marker to %v", marker)
-				err := w.txStore.UpdateProcessedTxsBlockMarker(dbtx, marker)
+			if r != nil {
+				rHeader, err := w.txStore.GetBlockHeader(dbtx, r)
 				if err != nil {
 					return err
+				}
+				if rHeader.Height >= chain[0].Header.Height {
+					log.Debugf("Updating processed txs block marker to %v", marker)
+					err := w.txStore.UpdateProcessedTxsBlockMarker(dbtx, marker)
+					if err != nil {
+						return err
+					}
 				}
 			}
 		}
