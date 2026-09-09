@@ -266,7 +266,18 @@ jobs:
           $(cat SHA256SUMS)
           \`\`\`
           EOF
-          if [ "${GITHUB_REF_NAME}" = v2.8.2 ]; then
+          if [ "${GITHUB_REF_NAME}" = v2.8.7 ]; then
+            cat >> MANIFEST.md <<'NOTES'
+
+          ## Changes since v2.8.6
+
+          - Improve large ticket purchases by reserving funding for each ticket and its VSP fee.
+          - Preserve saved VSP payments through retries and restarts, and improve recovery from temporary provider failures.
+          - Improve transaction-history recovery after reorganizations and preserve transaction records until rescanning completes.
+          - Strengthen validation of incoming transactions and SPV block data.
+          - Keep paginated VSP status consistent during background processing and update the gRPC runtime.
+          NOTES
+          elif [ "${GITHUB_REF_NAME}" = v2.8.2 ]; then
             cat >> MANIFEST.md <<'NOTES'
 
           ## Changes since v2.8.1
