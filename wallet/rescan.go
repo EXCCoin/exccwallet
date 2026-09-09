@@ -9,13 +9,13 @@ import (
 	"context"
 	"time"
 
-	"github.com/EXCCoin/exccwallet/v2/errors"
-	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
-	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 	"github.com/EXCCoin/exccd/chaincfg/chainhash"
 	"github.com/EXCCoin/exccd/crypto/ripemd160"
 	"github.com/EXCCoin/exccd/txscript/v4/stdaddr"
 	"github.com/EXCCoin/exccd/wire"
+	"github.com/EXCCoin/exccwallet/v2/errors"
+	"github.com/EXCCoin/exccwallet/v2/wallet/udb"
+	"github.com/EXCCoin/exccwallet/v2/wallet/walletdb"
 )
 
 const maxBlocksPerRescan = 2000
@@ -236,9 +236,17 @@ func (w *Wallet) rescan(ctx context.Context, n NetworkBackend,
 		if err != nil {
 			return err
 		}
+		w.lockedOutpointMu.Lock()
 		err = walletdb.Update(ctx, w.db, func(dbtx walletdb.ReadWriteTx) error {
-			return w.txStore.UpdateProcessedTxsBlockMarker(dbtx, &rescanBlocks[len(rescanBlocks)-1])
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := w.txStore.UpdateProcessedTxsBlockMarker(dbtx, &rescanBlocks[len(rescanBlocks)-1]); err != nil {
+				return err
+			}
+			return w.pruneUnmined(dbtx)
 		})
+		w.lockedOutpointMu.Unlock()
 		if err != nil {
 			return err
 		}

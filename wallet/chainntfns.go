@@ -229,33 +229,7 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest,
 			}
 		}
 
-		// Prune unmined transactions that don't belong on the extended chain.
-		// An error here is not fatal and should just be logged.
-		tip := chain[len(chain)-1]
-		var sdiff dcrutil.Amount
-		var sdiffErr error
-		if !deployments.DCP0001.Active(int32(tip.Header.Height), w.chainParams.Net) {
-			sdiffErr = errors.E(errors.Deployment,
-				"DCP0001 is not known to be active")
-		} else {
-			sdiff, sdiffErr = w.nextRequiredDCP0001PoSDifficulty(dbtx,
-				tip.Header, nil)
-		}
-		if sdiffErr != nil {
-			log.Errorf("Unable to prune unmined tickets: next ticket price is unknown: %v",
-				sdiffErr)
-			sdiff = 0
-		}
-		hashes, err := w.txStore.PruneUnmined(dbtx, sdiff)
-		if err != nil {
-			log.Errorf("Failed to prune unmined transactions when "+
-				"connecting block height %v: %v", tip.Header.Height, err)
-		}
-
-		for _, hash := range hashes {
-			w.NtfnServer.notifyRemovedTransaction(*hash)
-		}
-		return w.pruneVSPTickets(dbtx, hashes)
+		return w.pruneUnmined(dbtx)
 	})
 	w.lockedOutpointMu.Unlock()
 	if err != nil {
@@ -294,6 +268,46 @@ func (w *Wallet) ChainSwitch(ctx context.Context, forest *SidechainForest,
 	w.NtfnServer.sendAttachedBlockNotification(ctx)
 
 	return prevChain, nil
+}
+
+// pruneUnmined runs only after all main-chain transaction history is known.
+// Until then, a locally unmined ticket may already be mined in an unscanned block.
+func (w *Wallet) pruneUnmined(dbtx walletdb.ReadWriteTx) error {
+	rescan, err := w.rescanPoint(dbtx)
+	if err != nil || rescan != nil {
+		return err
+	}
+	tipHash, _ := w.txStore.MainChainTip(dbtx)
+	tip, err := w.txStore.GetBlockHeader(dbtx, &tipHash)
+	if err != nil {
+		return err
+	}
+	// Prune unmined transactions that don't belong on the extended chain.
+	// An error here is not fatal and should just be logged.
+	var sdiff dcrutil.Amount
+	var sdiffErr error
+	if !deployments.DCP0001.Active(int32(tip.Height), w.chainParams.Net) {
+		sdiffErr = errors.E(errors.Deployment,
+			"DCP0001 is not known to be active")
+	} else {
+		sdiff, sdiffErr = w.nextRequiredDCP0001PoSDifficulty(dbtx,
+			tip, nil)
+	}
+	if sdiffErr != nil {
+		log.Errorf("Unable to prune unmined tickets: next ticket price is unknown: %v",
+			sdiffErr)
+		sdiff = 0
+	}
+	hashes, err := w.txStore.PruneUnmined(dbtx, sdiff)
+	if err != nil {
+		log.Errorf("Failed to prune unmined transactions when "+
+			"connecting block height %v: %v", tip.Height, err)
+	}
+
+	for _, hash := range hashes {
+		w.NtfnServer.notifyRemovedTransaction(*hash)
+	}
+	return w.pruneVSPTickets(dbtx, hashes)
 }
 
 // evaluateStakePoolTicket evaluates a stake pool ticket to see if it's

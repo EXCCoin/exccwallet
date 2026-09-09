@@ -209,7 +209,7 @@ func TestChainSwitchPrunesTicketsWithNextStakeDifficulty(t *testing.T) {
 			}
 			prevHash = header.BlockHash()
 		}
-		return nil
+		return w.txStore.UpdateProcessedTxsBlockMarker(dbtx, &prevHash)
 	})
 	if err != nil {
 		t.Fatal(err)
