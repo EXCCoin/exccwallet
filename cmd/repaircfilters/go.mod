@@ -23,8 +23,7 @@ require (
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
 	github.com/decred/slog v1.2.0 // indirect
-	github.com/gorilla/websocket v1.5.1 // indirect
-	golang.org/x/net v0.56.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 )

@@ -275,7 +275,7 @@ jobs:
           - Preserve saved VSP payments through retries and restarts, and improve recovery from temporary provider failures.
           - Improve transaction-history recovery after reorganizations and preserve transaction records until rescanning completes.
           - Strengthen validation of incoming transactions and SPV block data.
-          - Keep paginated VSP status consistent during background processing and update the gRPC runtime.
+          - Keep paginated VSP status consistent during background processing and update the gRPC and WebSocket runtimes.
           NOTES
           elif [ "${GITHUB_REF_NAME}" = v2.8.2 ]; then
             cat >> MANIFEST.md <<'NOTES'

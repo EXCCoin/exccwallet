@@ -29,7 +29,7 @@ require (
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
 	github.com/golang/protobuf v1.5.4
-	github.com/gorilla/websocket v1.5.1
+	github.com/gorilla/websocket v1.5.3
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/jrick/bitset v1.0.0
 	github.com/jrick/logrotate v1.0.0
