@@ -4845,9 +4845,7 @@ func (w *Wallet) SignTransaction(ctx context.Context, tx *wire.MsgTx, hashType t
 					addrStr := addr.String()
 					wif, ok := additionalKeysByAddress[addrStr]
 					if !ok {
-						return nil, 0, false,
-							errors.Errorf("no key for address (needed: %v, have %v)",
-								addr, additionalKeysByAddress)
+						return nil, 0, false, errors.Errorf("no key for address %v", addr)
 					}
 					return wif.PrivKey(), dcrec.STEcdsaSecp256k1, true, nil
 				}
