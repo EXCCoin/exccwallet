@@ -19,12 +19,21 @@ func mustParseHash(s string) chainhash.Hash {
 	return *h
 }
 
-var testnet3block962928Hash = mustParseHash("0000004fd1b267fd39111d456ff557137824538e6f6776168600e56002e23b93")
+var (
+	mainnetblock1726905Hash = mustParseHash("0000193e7b4c05dd28f56bc7c9180364dab3357b5a4a23f2a776fc44d7b61901")
+	testnet3block962928Hash = mustParseHash("0000004fd1b267fd39111d456ff557137824538e6f6776168600e56002e23b93")
+)
 
 // CheckpointHash returns the block hash of a checkpoint block for the network
 // and height, or nil if there is no checkpoint.
 func CheckpointHash(network wire.CurrencyNet, height int32) *chainhash.Hash {
-	if network == wire.TestNet3 {
+	switch network {
+	case wire.MainNet:
+		switch height {
+		case 1726905:
+			return &mainnetblock1726905Hash
+		}
+	case wire.TestNet3:
 		switch height {
 		case 962928:
 			return &testnet3block962928Hash
@@ -46,7 +55,10 @@ func BadCheckpoint(network wire.CurrencyNet, hash *chainhash.Hash, height int32)
 func (w *Wallet) rollbackInvalidCheckpoints(dbtx walletdb.ReadWriteTx) error {
 	txmgrNs := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
 	var checkpoints []int32
-	if w.chainParams.Net == wire.TestNet3 {
+	switch w.chainParams.Net {
+	case wire.MainNet:
+		checkpoints = []int32{1726905}
+	case wire.TestNet3:
 		checkpoints = []int32{962928}
 	}
 	for _, height := range checkpoints {
