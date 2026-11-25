@@ -399,6 +399,18 @@ func (s *Store) PruneUnmined(dbtx walletdb.ReadWriteTx, sdiff dcrutil.Amount) ([
 
 	removed := make([]*chainhash.Hash, 0, len(toRemove))
 	for _, r := range toRemove {
+		if existsRawUnmined(ns, r.hash[:]) == nil {
+			continue
+		}
+		if stake.IsSStx(&r.tx) {
+			feeHash, err := s.pruneUnpublishedVSPFee(dbtx, r.hash)
+			if err != nil {
+				return removed, err
+			}
+			if feeHash != nil {
+				removed = append(removed, feeHash)
+			}
+		}
 		err := s.RemoveUnconfirmed(ns, &r.tx, r.hash)
 		if err != nil {
 			return removed, err
@@ -407,4 +419,54 @@ func (s *Store) PruneUnmined(dbtx walletdb.ReadWriteTx, sdiff dcrutil.Amount) ([
 	}
 
 	return removed, nil
+}
+
+// pruneUnpublishedVSPFee removes a separately funded fee when its unmined
+// ticket is pruned. A VSP only broadcasts fees after the ticket is mined.
+// Preserve any payment with evidence of publication, confirmation, sharing,
+// or a dependent transaction; abandoning those requires reconciliation.
+func (s *Store) pruneUnpublishedVSPFee(dbtx walletdb.ReadWriteTx, ticketHash *chainhash.Hash) (*chainhash.Hash, error) {
+	info, err := GetVSPTicket(dbtx, *ticketHash)
+	if errors.Is(err, errors.NotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	feeHash := info.FeeHash
+	if feeHash == (chainhash.Hash{}) || info.FeeTxStatus == uint32(VSPFeeProcessConfirmed) {
+		return nil, nil
+	}
+	ns := dbtx.ReadWriteBucket(wtxmgrBucketKey)
+	v := existsRawUnmined(ns, feeHash[:])
+	if v == nil || !existsUnpublished(ns, feeHash[:]) {
+		return nil, nil
+	}
+	var fee TxRecord
+	if err := readRawTxRecord(&feeHash, v, &fee); err != nil {
+		return nil, err
+	}
+	if stake.DetermineTxType(&fee.MsgTx, true, false) != stake.TxTypeRegular {
+		return nil, nil
+	}
+	shared := false
+	err = dbtx.ReadBucket(vspBucketKey).ForEach(func(k, v []byte) error {
+		if !bytes.Equal(k, ticketHash[:]) && deserializeVSPTicket(v).FeeHash == feeHash {
+			shared = true
+		}
+		return nil
+	})
+	if err != nil || shared {
+		return nil, nil
+	}
+	for i := range fee.MsgTx.TxOut {
+		if existsRawUnminedInput(ns, canonicalOutPoint(&feeHash, uint32(i))) != nil {
+			return nil, nil
+		}
+	}
+	if err := s.RemoveUnconfirmed(ns, &fee.MsgTx, &feeHash); err != nil {
+		return nil, err
+	}
+	log.Infof("Removed unpublished VSP fee %v for pruned ticket %v", feeHash, ticketHash)
+	return &feeHash, nil
 }
