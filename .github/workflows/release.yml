@@ -266,7 +266,16 @@ jobs:
           $(cat SHA256SUMS)
           \`\`\`
           EOF
-          if [ "${GITHUB_REF_NAME}" = v2.8.7 ]; then
+          if [ "${GITHUB_REF_NAME}" = v2.8.8 ]; then
+            cat >> MANIFEST.md <<'NOTES'
+
+          ## Changes since v2.8.7
+
+          - Prune unpublished VSP fee transactions when unmined tickets expire or miss a stake difficulty change, while retaining associations for published or mined fee payments.
+          - Redact caller key maps from missing-key signing error messages.
+          - Anchor SPV mainnet sync to the post-recovery checkpoint at block 1,726,905 and update EXCCoin/exccd module dependencies to v2.8.3.
+          NOTES
+          elif [ "${GITHUB_REF_NAME}" = v2.8.7 ]; then
             cat >> MANIFEST.md <<'NOTES'
 
           ## Changes since v2.8.6
